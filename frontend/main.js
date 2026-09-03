@@ -70,6 +70,11 @@ const appState = {
 
   // Whether stream live-tail is running
   isTailing: false,
+
+  // Monitoring: last status payload, the cluster grid, and the selected row
+  monitorStatus: null,
+  monitorServers: [],
+  monitorServer: null,
 };
 
 // Native popover support - Chrome 114+, Safari 17+, Firefox 125+.
@@ -120,6 +125,15 @@ function initializeApp() {
   refreshTemplateUi();
   refreshContextUi();
 
+  nats.setMonitorHandlers({
+    onServers: handleMonitorServers,
+    onEvent: ui.appendMonitorEvent,
+    onStatus: applyMonitorStatus,
+  });
+  // Order matters: restoring the URLs re-registers them with the backend, and
+  // loadMonitor then reports a status that includes them.
+  restoreMonitorHttp().then(loadMonitor);
+
   // Restore log direction before anything can render into the log
   ui.setNewestFirst(storage.getLogNewestFirst(), { reflow: false });
   ui.clearLogs();
@@ -144,6 +158,11 @@ function setupTabNavigation() {
     if (!btn) return;
     const name = btn.dataset.tab;
     ui.switchTab(name);
+
+    // Monitoring works with no NATS connection at all: $SYS and :8222 are
+    // their own connections. So it reloads before the guard, not after it.
+    if (name === "monitor") loadMonitor();
+
     if (!nats.isConnected()) return;
     if (name === "kv") loadKvBucketsWrapper();
     else if (name === "stream") loadStreamsWrapper();
@@ -293,6 +312,7 @@ async function handleConnect() {
       resetDataPanels();
 
       ui.showToast("Disconnected", "info");
+      refreshMonitorStatus();
     } catch (err) {
       console.error("Error during disconnect:", err);
       ui.showToast(`Disconnect error: ${err.message}`, "error");
@@ -353,6 +373,7 @@ async function handleConnect() {
           appState.connectedUrl = null;
           resetDataPanels();
           stopTailUi();
+          refreshMonitorStatus();
           if (err) ui.showToast(`Connection lost: ${err.message}`, "error");
         } else if (status === "connected") {
           ui.showToast("Reconnected", "success");
@@ -369,6 +390,7 @@ async function handleConnect() {
       "success"
     );
     closeConnPopover();
+    refreshMonitorStatus();
 
     await restoreSubscriptions(activeUrl);
 
@@ -540,6 +562,14 @@ async function refreshContextUi(select = appState.contextName) {
   }));
   ui.renderNamedOptions(els.contextSelect, items, "-- Manual settings --");
 
+  // The monitor's system-account picker offers the same contexts. A system
+  // user is usually its own context anyway, which is the tidiest way to give
+  // the second connection credentials without nats-desk storing any.
+  const monSelected = els.monSysContext.value;
+  ui.renderNamedOptions(els.monSysContext, items, "-- Manual settings --");
+  els.monSysContext.value = appState.contexts.some((c) => c.name === monSelected) ? monSelected : "";
+  els.monSysManual.hidden = !!els.monSysContext.value;
+
   els.contextSelect.value = appState.contexts.some((c) => c.name === select) ? select : "";
   applyContextSelection();
 }
@@ -676,6 +706,236 @@ async function handleContextDefault() {
     ui.showToast(err.message, "error");
   }
 }
+
+
+// ============================================================================
+// MONITOR HANDLERS
+// ============================================================================
+// Three sources, configured separately because they are not interchangeable:
+// the data connection sees only its own account, $SYS sees the whole cluster
+// and pushes events, and :8222 works where no system user exists. See
+// internal/monitor for the full reasoning.
+
+/** Reflect a status payload from the backend across the sources panel. */
+function applyMonitorStatus(status) {
+  appState.monitorStatus = status;
+  ui.setMonitorSources(status);
+
+  const sys = (status && status.sys) || {};
+  els.btnMonSysConnect.hidden = !!sys.connected;
+  els.btnMonSysDisconnect.hidden = !sys.connected;
+
+  els.monSysHint.hidden = !sys.configured;
+  els.monSysHint.classList.toggle("bad", sys.configured && !sys.connected);
+  if (sys.configured) {
+    els.monSysHint.textContent = sys.connected
+      ? `${sys.url} \u00b7 ${sys.servers || 0} server${sys.servers === 1 ? "" : "s"}`
+      : `${sys.url} \u00b7 not connected`;
+  }
+
+  const http = (status && status.http) || {};
+  els.monHttpHint.hidden = !http.configured;
+  if (http.configured) {
+    const n = (http.bases || []).length;
+    els.monHttpHint.textContent = `${n} monitoring URL${n === 1 ? "" : "s"}`;
+  }
+}
+
+function handleMonitorServers(rows) {
+  appState.monitorServers = rows;
+  ui.renderMonitorServers(rows, selectMonitorServer);
+  if (appState.monitorServer) ui.highlightMonitorServer(appState.monitorServer);
+
+  // The grid arrives on its own - a server heartbeats, a row appears - so the
+  // count in the sources panel has to follow it rather than sitting on
+  // whatever the last status payload happened to say.
+  const st = appState.monitorStatus;
+  if (st && st.sys && st.sys.configured && st.sys.servers !== rows.length) {
+    applyMonitorStatus({ ...st, sys: { ...st.sys, servers: rows.length } });
+  }
+}
+
+/**
+ * Re-read which sources are live.
+ *
+ * The data source is the app's own connection, and the backend does not push
+ * monitoring status when that changes - so the one dot the connection form
+ * owns is refreshed from here instead.
+ */
+async function refreshMonitorStatus() {
+  try {
+    applyMonitorStatus(await nats.getMonitorStatus());
+  } catch {
+    // Purely cosmetic; leave the panel showing what it last knew.
+  }
+}
+
+function selectMonitorServer(row) {
+  appState.monitorServer = row.id;
+  ui.highlightMonitorServer(row.id);
+  ui.renderMonitorDetail(row);
+  ui.switchSubTab("monitor", "server");
+}
+
+/**
+ * Load the Monitor tab.
+ *
+ * Everything here is safe without a NATS connection: the $SYS and :8222
+ * sources have nothing to do with the app's own connection, which is the
+ * whole point of keeping them separate.
+ */
+async function loadMonitor() {
+  try {
+    applyMonitorStatus(await nats.getMonitorStatus());
+    handleMonitorServers(await nats.getMonitorServers());
+  } catch (err) {
+    ui.showToast(err.message, "error");
+  }
+}
+
+async function handleMonitorRefresh() {
+  try {
+    handleMonitorServers(await nats.refreshMonitorServers());
+    applyMonitorStatus(await nats.getMonitorStatus());
+  } catch (err) {
+    ui.showToast(err.message, "error");
+  }
+}
+
+async function handleMonSysConnect() {
+  const ctx = els.monSysContext.value;
+  const body = ctx
+    ? { context: ctx }
+    : {
+        url: els.monSysUrl.value.trim(),
+        user: els.monSysUser.value.trim(),
+        pass: els.monSysPass.value,
+      };
+
+  if (!ctx && !body.url) {
+    ui.showToast("A system account URL or a context is required", "error");
+    return;
+  }
+
+  els.btnMonSysConnect.disabled = true;
+  try {
+    applyMonitorStatus(await nats.connectMonitorSys(body));
+    handleMonitorServers(await nats.getMonitorServers());
+    ui.showToast("System account connected", "success");
+  } catch (err) {
+    ui.showToast(err.message, "error");
+  } finally {
+    els.btnMonSysConnect.disabled = false;
+  }
+}
+
+async function handleMonSysDisconnect() {
+  try {
+    applyMonitorStatus(await nats.disconnectMonitorSys());
+    handleMonitorServers([]);
+    ui.showToast("System account disconnected", "info");
+  } catch (err) {
+    ui.showToast(err.message, "error");
+  }
+}
+
+async function handleMonHttpSave() {
+  const bases = els.monHttpBases.value
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  try {
+    applyMonitorStatus(
+      await nats.setMonitorHttp({ bases, insecure: els.monHttpInsecure.checked })
+    );
+    storage.setMonitorHttp({ bases, insecure: els.monHttpInsecure.checked });
+
+    // Fetching varz is also what populates the grid from this source, so a
+    // "Use" that showed nothing would look like it had not worked.
+    await nats.getMonitorHttpEndpoint("varz");
+    handleMonitorServers(await nats.getMonitorServers());
+    ui.showToast(`Monitoring ${bases.length} URL${bases.length === 1 ? "" : "s"}`, "success");
+  } catch (err) {
+    ui.showToast(err.message, "error");
+  }
+}
+
+async function handleMonHttpClear() {
+  try {
+    applyMonitorStatus(await nats.clearMonitorHttp());
+    storage.setMonitorHttp(null);
+    ui.showToast("Monitoring URLs cleared", "info");
+  } catch (err) {
+    ui.showToast(err.message, "error");
+  }
+}
+
+async function handleMonEndpoint() {
+  const name = els.monEndpoint.value;
+  const via = els.monEndpointVia.value;
+
+  ui.setEmpty(els.monDetail, `Asking every server for ${name}\u2026`);
+  try {
+    const res =
+      via === "http"
+        ? await nats.getMonitorHttpEndpoint(name)
+        : await nats.getMonitorEndpoint(name);
+    ui.renderJsonInto(els.monDetail, res);
+  } catch (err) {
+    ui.setEmpty(els.monDetail, err.message, true);
+  }
+}
+
+async function handleMonAccountLoad() {
+  ui.setEmpty(els.monAccount, "Asking\u2026");
+  try {
+    ui.renderJsonInto(els.monAccount, await nats.getMonitorAccount());
+  } catch (err) {
+    ui.setEmpty(els.monAccount, err.message, true);
+  }
+}
+
+/**
+ * Put the remembered monitoring URLs back, in the form and in the backend.
+ *
+ * The backend holds them only for the life of the process, so a restart would
+ * otherwise leave the form showing URLs that are not actually in use. These
+ * are addresses, not credentials - re-applying them costs nothing and asks
+ * nobody anything until the grid is refreshed.
+ */
+async function restoreMonitorHttp() {
+  const saved = storage.getMonitorHttp();
+  if (!saved || !saved.bases || !saved.bases.length) return;
+
+  els.monHttpBases.value = saved.bases.join("\n");
+  els.monHttpInsecure.checked = !!saved.insecure;
+
+  try {
+    applyMonitorStatus(await nats.setMonitorHttp({ bases: saved.bases, insecure: saved.insecure }));
+  } catch (err) {
+    // A saved URL that no longer parses should not stop the app loading.
+    console.error("Could not restore monitoring URLs:", err);
+  }
+}
+
+els.btnMonRefresh.addEventListener("click", handleMonitorRefresh);
+els.btnMonSysConnect.addEventListener("click", handleMonSysConnect);
+els.btnMonSysDisconnect.addEventListener("click", handleMonSysDisconnect);
+els.btnMonHttpSave.addEventListener("click", handleMonHttpSave);
+els.btnMonHttpClear.addEventListener("click", handleMonHttpClear);
+els.btnMonEndpoint.addEventListener("click", handleMonEndpoint);
+els.btnMonAccountLoad.addEventListener("click", handleMonAccountLoad);
+els.btnMonEventsClear.addEventListener("click", ui.clearMonitorEvents);
+els.monEventFilter.addEventListener("input", () =>
+  ui.filterList(els.monEventFilter, els.monEvents, ".mon-event")
+);
+
+// A context supplies the URL and the credentials, so the manual fields it
+// replaces go away rather than sitting there doing nothing.
+els.monSysContext.addEventListener("change", () => {
+  els.monSysManual.hidden = !!els.monSysContext.value;
+});
 
 els.contextSelect.addEventListener("change", applyContextSelection);
 els.btnContextNew.addEventListener("click", handleContextNew);

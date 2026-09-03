@@ -33,6 +33,43 @@ export const els = {
   btnProfileSave: $("btnProfileSave"),
   btnProfileDelete: $("btnProfileDelete"),
 
+  // --- Monitor ---------------------------------------------------------------
+  srcDataDot: $("srcDataDot"),
+  srcSysDot: $("srcSysDot"),
+  srcHttpDot: $("srcHttpDot"),
+
+  monSysContext: $("monSysContext"),
+  monSysManual: $("monSysManual"),
+  monSysUrl: $("monSysUrl"),
+  monSysUser: $("monSysUser"),
+  monSysPass: $("monSysPass"),
+  monSysHint: $("monSysHint"),
+  btnMonSysConnect: $("btnMonSysConnect"),
+  btnMonSysDisconnect: $("btnMonSysDisconnect"),
+
+  monHttpBases: $("monHttpBases"),
+  monHttpInsecure: $("monHttpInsecure"),
+  monHttpHint: $("monHttpHint"),
+  btnMonHttpSave: $("btnMonHttpSave"),
+  btnMonHttpClear: $("btnMonHttpClear"),
+
+  monServerList: $("monServerList"),
+  monServerCount: $("monServerCount"),
+  btnMonRefresh: $("btnMonRefresh"),
+
+  monEndpoint: $("monEndpoint"),
+  monEndpointVia: $("monEndpointVia"),
+  btnMonEndpoint: $("btnMonEndpoint"),
+  monDetail: $("monDetail"),
+
+  monEvents: $("monEvents"),
+  monEventCount: $("monEventCount"),
+  monEventFilter: $("monEventFilter"),
+  btnMonEventsClear: $("btnMonEventsClear"),
+
+  monAccount: $("monAccount"),
+  btnMonAccountLoad: $("btnMonAccountLoad"),
+
   contextSelect: $("contextSelect"),
   contextHint: $("contextHint"),
   btnContextNew: $("btnContextNew"),

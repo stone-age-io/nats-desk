@@ -80,7 +80,7 @@ type AuthOptions struct {
 
 // Connect replaces any existing connection, using credentials the UI collected.
 func (m *Manager) Connect(url string, auth AuthOptions) error {
-	authOpt, err := auth.option()
+	authOpt, err := auth.Option()
 	if err != nil {
 		return err
 	}
@@ -138,11 +138,14 @@ func (m *Manager) ConnectWith(url string, opts []nats.Option) error {
 	return nil
 }
 
-// option turns the collected credentials into a nats.Option.
+// Option turns the collected credentials into a nats.Option.
 //
 // Order matches the old client: a creds file wins, then a token, then
 // user/password. Anything absent simply means an anonymous connection.
-func (a AuthOptions) option() (nats.Option, error) {
+//
+// Exported because the monitoring package's system-account connection collects
+// the same fields through the same form and has to interpret them identically.
+func (a AuthOptions) Option() (nats.Option, error) {
 	switch {
 	case strings.TrimSpace(a.CredsText) != "":
 		// The UI hands us the file's contents, not a path. nats.go's
@@ -217,6 +220,13 @@ func (m *Manager) conn() (*nats.Conn, error) {
 		return nil, ErrNotConnected
 	}
 	return nc, nil
+}
+
+// Conn exposes the live connection for callers that issue their own
+// requests against it - the account-scoped monitoring endpoints, which are
+// auto-imported into every account and so need no second connection.
+func (m *Manager) Conn() (*nats.Conn, error) {
+	return m.conn()
 }
 
 func (m *Manager) IsConnected() bool {

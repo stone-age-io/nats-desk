@@ -17,6 +17,7 @@ import (
 	"github.com/stone-age-io/nats-desk/frontend"
 	"github.com/stone-age-io/nats-desk/internal/api"
 	"github.com/stone-age-io/nats-desk/internal/browse"
+	"github.com/stone-age-io/nats-desk/internal/monitor"
 	"github.com/stone-age-io/nats-desk/internal/natsconn"
 	"github.com/stone-age-io/nats-desk/internal/server"
 	"github.com/stone-age-io/nats-desk/internal/ws"
@@ -85,8 +86,13 @@ func run() error {
 	mgr := natsconn.New(hub)
 	defer mgr.Disconnect()
 
+	// Monitoring borrows the data connection for the account-scoped endpoints
+	// and opens its own for anything system-account or HTTP.
+	mon := monitor.New(mgr, hub, log)
+	defer mon.Close()
+
 	srv.Mount("/ws", hub)
-	api.New(mgr, log).Register(srv)
+	api.New(mgr, mon, log).Register(srv)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

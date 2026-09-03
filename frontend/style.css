@@ -286,6 +286,102 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
     minmax(0, 1fr);
 }
 
+
+/* --------------------------------------------------------------------------
+   MONITOR
+   Three panes: the sources you can configure, the servers they found, and one
+   detail region shared by the server view, the event feed and the account view.
+   -------------------------------------------------------------------------- */
+
+/* Two resizable columns, same shape as the KV tab */
+.panes-monitor {
+  grid-template-columns:
+    clamp(var(--min-col), var(--c0, 300px), calc(100% - var(--gutter) * 2 - var(--c1, 420px) - var(--min-flex)))
+    var(--gutter)
+    clamp(var(--min-col), var(--c1, 420px), calc(100% - var(--gutter) * 2 - var(--c0, 300px) - var(--min-flex)))
+    var(--gutter)
+    minmax(0, 1fr);
+}
+
+.source-list { padding: var(--s3); }
+
+.source-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s3);
+  margin-bottom: var(--s3);
+  background: var(--panel);
+}
+.source-card:last-child { margin-bottom: 0; }
+.source-card label { margin-top: var(--s2); }
+.source-card textarea { width: 100%; resize: vertical; }
+
+.source-head { display: flex; align-items: center; gap: var(--s2); }
+.source-head strong { font-size: 0.82rem; }
+
+/* Grey until a source reports itself live, so the panel is a status display
+   and not just a form. */
+.source-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--muted); flex: none;
+}
+.source-dot.live { background: var(--primary); }
+
+.source-note {
+  margin: var(--s2) 0 0; font-size: 0.72rem; line-height: 1.45; color: var(--muted);
+}
+.source-note code { font-size: 0.9em; }
+.source-hint { margin-top: var(--s2); font-size: 0.72rem; color: var(--accent); }
+.source-hint.bad { color: var(--danger); }
+
+.source-fields { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s2); }
+.source-fields input { margin: 0; }
+
+.row-buttons { display: flex; gap: var(--s2); margin-top: var(--s3); }
+.row-buttons .sm-btn { flex: 1; }
+.check-row.compact { margin: var(--s2) 0 0; }
+
+/* The grid is wide by nature, so it scrolls sideways inside its own pane
+   rather than making the page do it. */
+.mon-scroll { overflow: auto; }
+
+.mon-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; min-width: 560px; }
+.mon-table th, .mon-table td {
+  padding: var(--s2) var(--s3); text-align: left; white-space: nowrap;
+  border-bottom: 1px solid var(--border-soft);
+}
+.mon-table th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--panel);
+  font-weight: 600; color: var(--muted); font-size: 0.68rem;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.mon-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mon-table tbody tr { cursor: pointer; }
+.mon-table tbody tr:hover { background: var(--border-soft); }
+.mon-table tbody tr.active { background: rgba(88,166,255,0.12); color: var(--accent); }
+
+/* A row we have stopped hearing from. It stays, because a grid that silently
+   drops a line does not tell you a server went away. */
+.mon-table tbody tr.stale td { opacity: 0.45; }
+.mon-state { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.mon-state.shutdown, .mon-state.stale { color: var(--danger); }
+.mon-state.lameduck { color: var(--warn); }
+
+.mon-event {
+  display: grid; grid-template-columns: 72px 130px 1fr; gap: var(--s2);
+  padding: var(--s2) var(--s3); border-bottom: 1px solid var(--border-soft);
+  font-size: 0.72rem; align-items: baseline;
+}
+.mon-event .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+.mon-event .k { font-weight: 600; }
+.mon-event .k.shutdown, .mon-event .k.auth_error { color: var(--danger); }
+.mon-event .k.lameduck { color: var(--warn); }
+.mon-event .k.client_connect { color: var(--primary); }
+.mon-event .d { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+
+.mon-json { margin: 0; padding: var(--s3); font-size: 0.72rem; line-height: 1.5; white-space: pre; }
+
 /* --------------------------------------------------------------------------
    SPLITTERS
    A splitter occupies the gutter track between two panes and writes the
@@ -1013,7 +1109,7 @@ dialog.app-dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blu
   /* Stacked panes have nothing to drag between, so the splitters go away and
      the grid takes its gutter back as a plain row gap. */
   .panes,
-  .panes-msg, .panes-kv, .panes-stream {
+  .panes-msg, .panes-kv, .panes-stream, .panes-monitor {
     grid-template-columns: 1fr;
     gap: var(--s3);
     height: auto;
@@ -1031,6 +1127,7 @@ dialog.app-dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blu
   .pane-list .list-scroll { min-height: 96px; max-height: 260px; }
   .log-pane .list-scroll { min-height: 340px; max-height: 60vh; }
   #consumerList, #streamMsgContainer { min-height: 260px; max-height: 60vh; }
+  #monServerList, #monEvents, #monDetail, #monAccount { min-height: 240px; max-height: 60vh; }
   .log-wrap { flex: none; }
   .value-view, .value-edit { flex: none; height: 260px; }
 

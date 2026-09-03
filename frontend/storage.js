@@ -19,6 +19,7 @@ const KEYS = {
   EXCLUDE_SYSTEM: "nats_exclude_system",
   LOG_NEWEST_FIRST: "nats_log_newest_first",
   PANE_SIZES: "nats_pane_sizes",
+  MONITOR_HTTP: "nats_monitor_http",
 };
 
 // ============================================================================
@@ -279,6 +280,27 @@ export function setPaneSize(group, index, width) {
   else all[group] = cols;
 
   saveJson(KEYS.PANE_SIZES, all);
+}
+
+// ============================================================================
+// MONITORING: THE :8222 URLs
+// ============================================================================
+// Shape: { bases: [url], insecure: bool }
+//
+// Only the HTTP source is remembered. The system-account connection is
+// credentials, and nats-desk does not make a second copy of those - it points
+// at the NATS CLI context that already holds them, or asks for them again.
+
+export function getMonitorHttp() {
+  return loadJson(KEYS.MONITOR_HTTP, null);
+}
+
+export function setMonitorHttp(cfg) {
+  if (!cfg) {
+    localStorage.removeItem(KEYS.MONITOR_HTTP);
+    return;
+  }
+  saveJson(KEYS.MONITOR_HTTP, cfg);
 }
 
 // ============================================================================

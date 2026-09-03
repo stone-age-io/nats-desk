@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/stone-age-io/nats-desk/internal/monitor"
 	"github.com/stone-age-io/nats-desk/internal/natsconn"
 )
 
@@ -24,11 +25,12 @@ type Mounter interface {
 
 type API struct {
 	mgr *natsconn.Manager
+	mon *monitor.Monitor
 	log *slog.Logger
 }
 
-func New(mgr *natsconn.Manager, log *slog.Logger) *API {
-	return &API{mgr: mgr, log: log}
+func New(mgr *natsconn.Manager, mon *monitor.Monitor, log *slog.Logger) *API {
+	return &API{mgr: mgr, mon: mon, log: log}
 }
 
 func (a *API) Register(m Mounter) {
@@ -46,6 +48,7 @@ func (a *API) Register(m Mounter) {
 	a.registerKV(route)
 	a.registerStreams(route)
 	a.registerContexts(route)
+	a.registerMonitor(route)
 }
 
 // ============================================================================

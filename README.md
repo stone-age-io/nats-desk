@@ -107,9 +107,24 @@ saved settings stay on the old one. Pick a port once.
   filter, as a single batch rather than one request per message
 - **Live tail:** follow new messages as they arrive
 
-### Coming
-Server monitoring via both `:8222` and the `$SYS` account. The UI tells you
-plainly when you reach something that isn't wired up yet.
+### Monitoring
+Three sources, each configured on its own, because they are not
+interchangeable:
+
+- **Your own account**, over the connection the app already has. Nothing to
+  configure: the server imports these endpoints into every account.
+- **The `$SYS` account**, as a second connection - point it at a NATS CLI
+  context and nothing is stored. The only source that reaches a whole cluster in
+  one request and *pushes* events, so the grid updates with no polling and a
+  client connecting shows up as it happens.
+- **The `:8222` endpoints**, which need no NATS credentials at all - the
+  fallback when no system user exists. They also have no authentication of their
+  own, which the UI says plainly.
+
+The cluster grid shows connections, subscriptions, CPU, memory and message
+rates per server. Rates are computed on the server's own clock, and a server we
+have only just met shows no rate at all rather than a fabricated zero. A server
+that stops reporting is dimmed, not dropped.
 
 ## Security
 

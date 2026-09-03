@@ -78,8 +78,7 @@ nats-desk/
 │   ├── natsconn/               # the NATS connection, pub/sub, subject rules
 │   ├── browse/                 # open a URL in the default browser
 │   ├── contexts/               # the nats CLI's own context store
-│   ├── monitor/                # (phase 4) three monitoring sources
-│   └── store/                  # (phase 3) profiles on disk
+│   └── monitor/                # three monitoring sources, a grid and a feed
 └── Makefile
 ```
 
@@ -114,6 +113,67 @@ silent gap in a message log is a lie. See `internal/ws/hub.go`.
 **Payloads cross the wire base64-encoded.** The old client decoded to a string
 on arrival and could only ever show a hex stub for binary. Now the bytes
 survive end to end and only the *display* falls back to hex.
+
+**The three monitoring sources are not interchangeable, and one of them cannot
+be merged with the data connection even in principle.** A `nats.Conn` is bound
+to one account for its lifetime, so a system-account view is *mandatorily* a
+second connection. Only `$SYS` fans out across a cluster in one request and
+pushes events as they happen; only `:8222` works where nobody has provisioned a
+system user; only the data connection needs no configuration at all, because
+the server auto-imports `$SYS.REQ.ACCOUNT.PING.{STATZ,CONNZ}` and
+`$SYS.REQ.USER.INFO` into every account, scoped to that account.
+
+**The cluster grid is pushed, not polled.** `$SYS.SERVER.*.STATSZ` arrives from
+every server every ten seconds by default, which is a live grid for free. The
+scatter-gather (`$SYS.REQ.SERVER.PING`) runs only on connect - so the grid is
+populated at once instead of after a ten second wait - and when someone presses
+refresh.
+
+**A rate is a pointer.** "We have not seen a second sample yet" and "the rate is
+zero" are different facts, and showing 0 msg/s for a busy server we have only
+just met is a made-up number presented as a measurement.
+
+**Rates are measured on the server's own clock**, from `ServerInfo.Time` or
+`Varz.Now`, never ours. The interval that matters is the one the counters
+accumulated over, and in a cluster the samples come from several machines whose
+clocks may not agree with ours or with each other. A counter that goes backwards
+means the process restarted, so that interval is skipped rather than reported as
+a large negative rate.
+
+**A scatter-gather is a census, so `RefreshServers` prunes.** Two things make
+this necessary: a server that is killed rather than shut down never sends
+`SHUTDOWN`, and a server that restarts comes back with a **new ID** - NATS
+generates one per process - so its old row would sit in the grid forever. Pruning
+only touches rows from the same family of sources; a `$SYS` census knows nothing
+about servers reached over `:8222`. Between censuses the UI dims a row whose
+`seen` is older than three heartbeats rather than dropping it, because a grid
+that silently loses a line does not tell you anything went away.
+
+**A fresh inbox per scatter-gather, deliberately.** nats-surveyor keeps one
+long-lived inbox with a per-poll key, and the original plan called for the same.
+It is not worth it here: the grid is pushed, so a scatter happens on connect and
+on an explicit refresh, and one subscribe/unsubscribe at that rate costs nothing
+against the bookkeeping. Revisit only if something ever polls faster than about
+once a second.
+
+**`:8222` has no authentication of any kind**, and setting `https_port` forces
+the server to `ClientAuth = NoClientCert`, so client certificates cannot gate it
+either. Anything it returns is readable by whoever can reach the port. Its TLS
+settings are its own in the UI, because the monitoring port routinely has a
+different certificate - often a private CA - from the client port.
+
+**Only the monitoring URLs are remembered; the system-account credentials are
+not.** URLs are addresses. Credentials belong in the NATS CLI context that
+already holds them, which is why the system-account panel offers the context
+picker first. The backend holds the system connection for the life of the
+process only, so the saved URLs are re-registered on load - otherwise the form
+would show URLs that are not actually in use.
+
+**Monitoring events take the batched WebSocket path; the grid and status take
+the control path.** On a cluster with connection churn,
+`$SYS.ACCOUNT.*.{CONNECT,DISCONNECT}` arrives as fast as clients come and go,
+which is a firehose by any other name. A grid update or a source going down is
+rare and must not be dropped.
 
 **A context is edited as its own file, not through a form.** The settings
 struct has two dozen fields and grows with the CLI; a form would silently drop
@@ -199,12 +259,27 @@ app is not using.
 `requestAnimationFrame` does not fire while the Browser pane is hidden, so it is
 useless as a responsiveness probe there. Use `setTimeout` lag instead.
 
-Test rig config lives in the scratchpad, not the repo: a single server with
-JetStream, `http_port: 8222`, an `APP` account and a `SYS` account with
-`system_account: SYS`, so all three monitoring sources are exercisable. `APP`
-also carries an **nkey user**, which is what makes "the backend reads a
-credential file the browser could never touch" testable locally - a `.creds`
-file would need the server in operator mode.
+Test rig config lives in the scratchpad, not the repo. Two rigs, on separate
+ports so both run at once:
+
+- a single server on 4222 with JetStream, `http_port: 8222`, an `APP` account
+  and a `SYS` account with `system_account: SYS`. `APP` also carries an **nkey
+  user**, which is what makes "the backend reads a credential file the browser
+  could never touch" testable locally - a `.creds` file would need the server in
+  operator mode.
+- a three node cluster on 4322-4324 (monitoring 8322-8324, routes 6322-6324),
+  same accounts, for the fan-out and the live grid.
+
+**nats-server on Windows accepts `--signal` only when installed as a service**,
+so `ldm` and `stop` return "Access is denied" against a console-run server and a
+*graceful* shutdown cannot be produced on this machine. `$SYS.REQ.SERVER.<id>.LDM`
+is not an alternative - despite the name it is a *client* operation, and sending
+it an empty body logs "Error unmarshalling kick client request". So the
+SHUTDOWN and LAMEDUCK grid marking is covered by a unit test that feeds
+`handleEvent` a crafted message, while the pushed-event path itself is proven
+live with CONNECT, DISCONNECT and AUTH.ERR. The hard-kill case - no event at
+all, row goes stale, census prunes it - is the one verified end to end, and is
+also the more common one in practice.
 
 Context tests must call `t.Setenv("XDG_CONFIG_HOME", t.TempDir())` first.
 natscontext reads that on every call and caches nothing, so it is enough to
@@ -219,7 +294,8 @@ not provide. Use `make test-race` where a toolchain exists.
 
 Coverage is currently thin and concentrated on the logic that is easy to get
 silently wrong: the subject filter rules, the KV operation mapping, the
-batching/drop accounting, and the context editor's round-trip fidelity. The HTTP and NATS layers are covered by driving the
+batching/drop accounting, the context editor's round-trip fidelity, and the
+monitoring rate arithmetic. The HTTP and NATS layers are covered by driving the
 real UI against a real server, not by unit tests.
 
 ## Status
@@ -230,5 +306,6 @@ real UI against a real server, not by unit tests.
   consumers, message-range fetch and live tail.
 - **Phase 3 (done):** NATS CLI contexts - list, create, edit, delete, set the
   CLI default, and connect through one.
-- **Phase 4:** monitoring - data connection, separate `$SYS` connection, and
-  HTTP `:8222`, each independently configurable.
+- **Phase 4 (done):** monitoring - data connection, separate `$SYS` connection
+  and HTTP `:8222`, each independently configurable; a live cluster grid with
+  rates, and an event feed.

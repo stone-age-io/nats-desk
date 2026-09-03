@@ -112,6 +112,7 @@
     <button class="tab active" data-tab="msg" role="tab" aria-selected="true" aria-controls="panel-msg">Messaging</button>
     <button class="tab" data-tab="kv" role="tab" aria-selected="false" aria-controls="panel-kv">KV Store</button>
     <button class="tab" data-tab="stream" role="tab" aria-selected="false" aria-controls="panel-stream">Streams</button>
+    <button class="tab" data-tab="monitor" role="tab" aria-selected="false" aria-controls="panel-monitor">Monitor</button>
   </nav>
 
   <main class="workspace">
@@ -393,6 +394,167 @@
               </div>
               <div id="streamMsgContainer" class="list-scroll">
                 <div class="empty">Click Load to view stream messages</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- ================================================================== -->
+    <!-- MONITOR                                                            -->
+    <!-- ================================================================== -->
+    <section class="tab-panel" data-tab-panel="monitor" id="panel-monitor" role="tabpanel" hidden>
+      <div class="panes panes-monitor" data-panes="monitor">
+
+        <div class="pane pane-list">
+          <div class="pane-head">
+            <h3>Sources</h3>
+          </div>
+          <div class="list-scroll source-list">
+
+            <div class="source-card">
+              <div class="source-head">
+                <span id="srcDataDot" class="source-dot" aria-hidden="true"></span>
+                <strong>Data connection</strong>
+              </div>
+              <p class="source-note">
+                Your own account, over the connection this app already has. Nothing to
+                configure - the server imports these endpoints into every account.
+              </p>
+            </div>
+
+            <div class="source-card">
+              <div class="source-head">
+                <span id="srcSysDot" class="source-dot" aria-hidden="true"></span>
+                <strong>System account</strong>
+              </div>
+              <p class="source-note">
+                A second connection, in the $SYS account. The only source that reaches a
+                whole cluster in one request and pushes events as they happen.
+              </p>
+
+              <label for="monSysContext">NATS CLI context</label>
+              <select id="monSysContext">
+                <option value="">-- Manual settings --</option>
+              </select>
+
+              <div id="monSysManual" class="source-fields">
+                <input type="text" id="monSysUrl" placeholder="nats://localhost:4222"
+                       autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <input type="text" id="monSysUser" placeholder="Username"
+                       autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <input type="password" id="monSysPass" placeholder="Password" />
+              </div>
+
+              <div class="row-buttons">
+                <button id="btnMonSysConnect" class="sm-btn accent">Connect</button>
+                <button id="btnMonSysDisconnect" class="sm-btn danger" hidden>Disconnect</button>
+              </div>
+              <div id="monSysHint" class="source-hint" hidden></div>
+            </div>
+
+            <div class="source-card">
+              <div class="source-head">
+                <span id="srcHttpDot" class="source-dot" aria-hidden="true"></span>
+                <strong>HTTP monitoring</strong>
+              </div>
+              <p class="source-note">
+                The <code>:8222</code> endpoints. Needs no NATS credentials - and offers no
+                authentication of its own, so treat anything it returns as readable by
+                whoever can reach that port.
+              </p>
+
+              <label for="monHttpBases">Base URLs, one per line</label>
+              <textarea id="monHttpBases" rows="3" placeholder="http://localhost:8222"
+                        autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+
+              <label class="check-row compact">
+                <input type="checkbox" id="monHttpInsecure" />
+                <span>Skip TLS verification</span>
+              </label>
+
+              <div class="row-buttons">
+                <button id="btnMonHttpSave" class="sm-btn accent">Use</button>
+                <button id="btnMonHttpClear" class="sm-btn">Clear</button>
+              </div>
+              <div id="monHttpHint" class="source-hint" hidden></div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="splitter" data-col="0" role="separator" tabindex="0"
+             aria-orientation="vertical" aria-label="Resize Sources pane"></div>
+
+        <div class="pane">
+          <div class="pane-head">
+            <h3>Servers <span id="monServerCount" class="accent">(0)</span></h3>
+            <div class="pane-actions">
+              <button id="btnMonRefresh" class="sm-btn" title="Ask every server for its stats now">&#10227;</button>
+            </div>
+          </div>
+          <div id="monServerList" class="list-scroll mon-scroll">
+            <div class="empty">No monitoring source is configured</div>
+          </div>
+        </div>
+
+        <div class="splitter" data-col="1" role="separator" tabindex="0"
+             aria-orientation="vertical" aria-label="Resize Servers pane"></div>
+
+        <div class="pane pane-detail">
+          <div class="detail-body">
+            <nav class="subtabs" data-subtabs="monitor" role="tablist" aria-label="Monitor detail">
+              <button class="subtab active" data-subtab="server" role="tab" aria-selected="true">Server</button>
+              <button class="subtab" data-subtab="events" role="tab" aria-selected="false">
+                Events <span id="monEventCount" class="pill-count">0</span>
+              </button>
+              <button class="subtab" data-subtab="account" role="tab" aria-selected="false">Account</button>
+            </nav>
+
+            <div class="subtab-panel" data-subtab-panel="server" role="tabpanel">
+              <div class="mini-toolbar wrap">
+                <select id="monEndpoint" class="sm-input" aria-label="Monitoring endpoint">
+                  <option value="varz">varz</option>
+                  <option value="connz">connz</option>
+                  <option value="jsz">jsz</option>
+                  <option value="healthz">healthz</option>
+                  <option value="routez">routez</option>
+                  <option value="subsz">subsz</option>
+                  <option value="accountz">accountz</option>
+                  <option value="leafz">leafz</option>
+                  <option value="gatewayz">gatewayz</option>
+                </select>
+                <select id="monEndpointVia" class="sm-input" aria-label="Which source to ask">
+                  <option value="sys">via $SYS</option>
+                  <option value="http">via :8222</option>
+                </select>
+                <button id="btnMonEndpoint" class="sm-btn">Load</button>
+              </div>
+              <div id="monDetail" class="list-scroll">
+                <div class="empty">Select a server, or load an endpoint</div>
+              </div>
+            </div>
+
+            <div class="subtab-panel" data-subtab-panel="events" role="tabpanel" hidden>
+              <div class="mini-toolbar">
+                <input type="text" id="monEventFilter" class="pane-filter inline" placeholder="Filter events&#8230;"
+                       autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <button id="btnMonEventsClear" class="sm-btn">Clear</button>
+              </div>
+              <div id="monEvents" class="list-scroll">
+                <div class="empty">Cluster events appear here while the system account connection is up</div>
+              </div>
+            </div>
+
+            <div class="subtab-panel" data-subtab-panel="account" role="tabpanel" hidden>
+              <div class="mini-toolbar">
+                <button id="btnMonAccountLoad" class="sm-btn">&#10227; Load</button>
+              </div>
+              <div id="monAccount" class="list-scroll">
+                <div class="empty">What your own account can see about itself</div>
               </div>
             </div>
           </div>

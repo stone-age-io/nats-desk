@@ -109,6 +109,7 @@ let statsHandler = null;
 let kvWatchHandler = null;
 let tailHandler = null;
 let droppedHandler = null;
+let monitorHandlers = {};
 
 /**
  * Called when the backend had to drop messages to keep the UI responsive.
@@ -116,6 +117,15 @@ let droppedHandler = null;
  */
 export function setDroppedHandler(fn) {
   droppedHandler = fn;
+}
+
+/**
+ * Monitoring arrives unprompted, so it needs handlers rather than a return
+ * value: the cluster grid, the event feed and the source status all change
+ * because a server said something, not because the UI asked.
+ */
+export function setMonitorHandlers({ onServers, onEvent, onStatus }) {
+  monitorHandlers = { onServers, onEvent, onStatus };
 }
 
 function wsUrl() {
@@ -181,6 +191,15 @@ function dispatch(frame) {
       break;
     case "kv":
       if (kvWatchHandler) kvWatchHandler(frame.key, frame.operation);
+      break;
+    case "monitor_servers":
+      if (monitorHandlers.onServers) monitorHandlers.onServers(frame.servers || []);
+      break;
+    case "monitor_event":
+      if (monitorHandlers.onEvent) monitorHandlers.onEvent(frame);
+      break;
+    case "monitor_status":
+      if (monitorHandlers.onStatus) monitorHandlers.onStatus(frame.status);
       break;
     case "tail":
       if (tailHandler) {
@@ -551,4 +570,55 @@ export async function deleteContext(name) {
 /** Make this the context every other NATS tool on the machine defaults to. */
 export async function selectContext(name) {
   return post(`/api/contexts/${encodeURIComponent(name)}/select`);
+}
+
+// ============================================================================
+// MONITORING
+// ============================================================================
+// Three sources, each configured on its own. See internal/monitor for why they
+// are not interchangeable.
+
+export async function getMonitorStatus() {
+  return get("/api/monitor/status");
+}
+
+export async function getMonitorServers() {
+  return get("/api/monitor/servers");
+}
+
+/** Ask every server now instead of waiting for its next heartbeat. */
+export async function refreshMonitorServers() {
+  return post("/api/monitor/refresh");
+}
+
+export async function getMonitorAccount() {
+  return get("/api/monitor/account");
+}
+
+/** Opens the second, system-account connection. Pass { context } or { url, user, pass }. */
+export async function connectMonitorSys(opts) {
+  await connectWs();
+  return post("/api/monitor/sys", opts);
+}
+
+export async function disconnectMonitorSys() {
+  return del("/api/monitor/sys");
+}
+
+export async function setMonitorHttp({ bases, ca = "", insecure = false }) {
+  return post("/api/monitor/http", { bases, ca, insecure });
+}
+
+export async function clearMonitorHttp() {
+  return del("/api/monitor/http");
+}
+
+/** One endpoint, fanned out over $SYS to every server in the cluster. */
+export async function getMonitorEndpoint(name) {
+  return get(`/api/monitor/endpoint/${encodeURIComponent(name)}`);
+}
+
+/** The same endpoint asked of each configured :8222 URL directly. */
+export async function getMonitorHttpEndpoint(name) {
+  return get(`/api/monitor/http/${encodeURIComponent(name)}`);
 }

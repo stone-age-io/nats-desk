@@ -18,6 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats.go"
+	"github.com/stone-age-io/nats-desk/internal/monitor"
 	"github.com/stone-age-io/nats-desk/internal/natsconn"
 )
 
@@ -296,6 +297,35 @@ func (h *Hub) KvChange(key, operation string) {
 		Key       string `json:"key"`
 		Operation string `json:"operation"`
 	}{Type: "kv", Key: key, Operation: operation})
+}
+
+// MonitorServers pushes the cluster grid. Control path: a server heartbeats
+// once every ten seconds, and a grid that quietly missed an update would show
+// a stale row with no way to tell.
+func (h *Hub) MonitorServers(rows []monitor.ServerRow) {
+	h.sendCtrl(struct {
+		Type    string              `json:"type"`
+		Servers []monitor.ServerRow `json:"servers"`
+	}{Type: "monitor_servers", Servers: rows})
+}
+
+// MonitorEvent takes the batched path. On a cluster with connection churn,
+// $SYS.ACCOUNT.*.CONNECT and DISCONNECT arrive as fast as clients come and go,
+// which is a firehose by any other name.
+func (h *Hub) MonitorEvent(ev monitor.Event) {
+	h.queueMsg(struct {
+		Type string `json:"type"`
+		monitor.Event
+	}{Type: "monitor_event", Event: ev})
+}
+
+// MonitorStatus pushes which sources are live. Control path: it is rare, and
+// it is what the sources panel draws itself from.
+func (h *Hub) MonitorStatus(st monitor.Status) {
+	h.sendCtrl(struct {
+		Type   string         `json:"type"`
+		Status monitor.Status `json:"status"`
+	}{Type: "monitor_status", Status: st})
 }
 
 // TailMessage takes the batched path: tailing a busy stream is as much of a

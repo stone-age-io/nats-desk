@@ -918,6 +918,133 @@ export function setConnectionState(state, url = null) {
   });
 }
 
+
+// ============================================================================
+// MONITOR
+// ============================================================================
+
+/**
+ * A server we have stopped hearing from.
+ *
+ * STATSZ arrives every ten seconds by default, so a row that has said nothing
+ * for three intervals has stopped reporting - a hard-killed server never sends
+ * SHUTDOWN, so this is the only signal there is. The row is dimmed rather than
+ * dropped: a grid that quietly loses a line does not tell you anything went
+ * away.
+ */
+const STALE_AFTER_MS = 30000;
+
+export function setMonitorSources(status) {
+  els.srcDataDot.classList.toggle("live", !!(status && status.data));
+  els.srcSysDot.classList.toggle("live", !!(status && status.sys && status.sys.connected));
+  els.srcHttpDot.classList.toggle("live", !!(status && status.http && status.http.configured));
+}
+
+function rate(v) {
+  if (v == null) return "-";
+  if (v >= 1000) return Math.round(v).toLocaleString();
+  if (v >= 10) return v.toFixed(0);
+  return v.toFixed(1);
+}
+
+export function renderMonitorServers(rows, onSelect) {
+  els.monServerCount.textContent = `(${rows.length})`;
+
+  if (!rows.length) {
+    setEmpty(els.monServerList, "No servers reporting yet");
+    return;
+  }
+
+  const now = Date.now();
+  const table = document.createElement("table");
+  table.className = "mon-table";
+  table.innerHTML =
+    "<thead><tr>" +
+    ["Server", "Cluster", "Conns", "Subs", "In/s", "Out/s", "CPU", "Mem", "Version", ""]
+      .map((h, i) => `<th${i >= 2 && i <= 7 ? ' class="num"' : ""}>${h}</th>`)
+      .join("") +
+    "</tr></thead>";
+
+  const body = document.createElement("tbody");
+  for (const r of rows) {
+    const stale = now - new Date(r.seen).getTime() > STALE_AFTER_MS;
+    const state = r.state || (stale ? "stale" : "");
+
+    const tr = document.createElement("tr");
+    tr.dataset.id = r.id;
+    if (stale) tr.classList.add("stale");
+    tr.innerHTML =
+      `<td>${utils.escapeHtml(r.name)}</td>` +
+      `<td>${utils.escapeHtml(r.cluster || "-")}</td>` +
+      `<td class="num">${r.connections}</td>` +
+      `<td class="num">${r.subscriptions}</td>` +
+      `<td class="num">${rate(r.in_msgs_rate)}</td>` +
+      `<td class="num">${rate(r.out_msgs_rate)}</td>` +
+      `<td class="num">${r.cpu.toFixed(0)}%</td>` +
+      `<td class="num">${utils.formatBytes(r.mem, 0)}</td>` +
+      `<td>${utils.escapeHtml(r.version)}</td>` +
+      `<td><span class="mon-state ${state}">${state}</span></td>`;
+    tr.addEventListener("click", () => onSelect(r));
+    body.append(tr);
+  }
+  table.append(body);
+
+  els.monServerList.replaceChildren(table);
+}
+
+export function highlightMonitorServer(id) {
+  els.monServerList.querySelectorAll("tr[data-id]").forEach((tr) => {
+    tr.classList.toggle("active", tr.dataset.id === id);
+  });
+}
+
+export function renderMonitorDetail(row) {
+  if (!row) {
+    setEmpty(els.monDetail, "Select a server, or load an endpoint");
+    return;
+  }
+  renderJsonInto(els.monDetail, row);
+}
+
+export function renderJsonInto(el, value) {
+  const pre = document.createElement("pre");
+  pre.className = "mon-json";
+  pre.innerHTML = utils.syntaxHighlight(value);
+  el.replaceChildren(pre);
+}
+
+let monEventCount = 0;
+
+export function appendMonitorEvent(ev) {
+  if (monEventCount === 0) els.monEvents.replaceChildren();
+
+  const row = document.createElement("div");
+  row.className = "mon-event";
+  const when = new Date(ev.at).toLocaleTimeString();
+  const where = ev.server || ev.subject || "";
+  row.innerHTML =
+    `<span class="t">${utils.escapeHtml(when)}</span>` +
+    `<span class="k ${ev.kind}">${utils.escapeHtml(ev.kind)}</span>` +
+    `<span class="d">${utils.escapeHtml(where)}</span>`;
+  row.title = ev.subject;
+
+  els.monEvents.prepend(row);
+  monEventCount++;
+  els.monEventCount.textContent = monEventCount;
+
+  // The feed is a tail, not a log: a busy cluster's connect/disconnect churn
+  // would grow the DOM without bound.
+  while (els.monEvents.childElementCount > 300) els.monEvents.lastElementChild.remove();
+
+  if (els.monEventFilter.value) filterList(els.monEventFilter, els.monEvents, ".mon-event");
+}
+
+export function clearMonitorEvents() {
+  monEventCount = 0;
+  els.monEventCount.textContent = "0";
+  setEmpty(els.monEvents, "Cluster events appear here while the system account connection is up");
+}
+
 export function setRtt(ms) {
   els.rttLabel.textContent = `${ms}ms`;
 }
