@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NATS Client</title>
+  <link rel="stylesheet" href="./style.css" />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="manifest" href="/manifest.json"/>
+</head>
+<body data-conn="disconnected">
+
+  <div id="toast-container"></div>
+
+  <!-- Shared datalists -->
+  <datalist id="urlHistory"></datalist>
+  <datalist id="subHistory"></datalist>
+
+  <!-- ==================================================================== -->
+  <!-- APP BAR                                                              -->
+  <!-- ==================================================================== -->
+  <header class="app-bar">
+    <div class="brand">
+      <!--
+        Stone-Age.io mark, same path as helpdesk ui/src/components/BrandLogo.vue.
+        The inner subpath winds against the outer circle, so the nonzero fill
+        rule knocks the interior out - left transparent on purpose so the panel
+        shows through, exactly as the source component renders it. Do not put a
+        disc behind it; the opaque white in the PWA icons is only there because
+        launcher icons sit on backgrounds we do not control.
+      -->
+      <svg class="brand-mark" viewBox="0 0 256 256" fill="currentColor" role="img" aria-label="Stone Age NATS Client">
+        <path d="M128,0 C57.343,0 0,57.343 0,128 C0,198.657 57.343,256 128,256 C198.657,256 256,198.657 256,128 C256,57.343 198.657,0 128,0 z M128,28 C181.423,28 224.757,71.334 224.757,124.757 C224.757,139.486 221.04,153.32 214.356,165.42 C198.756,148.231 178.567,138.124 162.876,124.331 C155.723,124.214 128.543,124.043 113.254,124.043 C113.254,147.334 113.254,172.064 113.254,190.513 C100.456,179.347 94.543,156.243 94.543,156.243 C83.432,147.065 31.243,124.757 31.243,124.757 C31.243,71.334 74.577,28 128,28 z"/>
+      </svg>
+      NATS
+    </div>
+
+    <div class="bar-spacer"></div>
+
+    <button id="btnConnStatus" class="conn-pill" popovertarget="connPopover" aria-haspopup="dialog">
+      <span id="statusDot" class="status-dot" aria-hidden="true"></span>
+      <span id="statusText">Disconnected</span>
+      <span id="statusHost" class="conn-host"></span>
+      <span id="rttLabel" class="conn-rtt"></span>
+      <span class="conn-caret" aria-hidden="true">&#9662;</span>
+    </button>
+
+    <button id="btnInfo" class="sm-btn" title="Server information" data-requires-conn>Server info</button>
+  </header>
+
+  <!-- ==================================================================== -->
+  <!-- CONNECTION POPOVER                                                   -->
+  <!-- ==================================================================== -->
+  <div id="connPopover" popover class="conn-popover" role="dialog" aria-label="Connection settings">
+    <div class="pane-head">
+      <h3>Connection</h3>
+      <div class="pane-actions">
+        <button id="btnProfileSave" class="sm-btn" title="Save these settings as a named profile">Save profile</button>
+        <button id="btnProfileDelete" class="sm-btn danger" title="Delete the selected profile">&#10005;</button>
+      </div>
+    </div>
+
+    <label for="profileSelect">Profile</label>
+    <select id="profileSelect" title="Connection profile">
+      <option value="">-- No Profile --</option>
+    </select>
+
+    <label for="serverUrl">Server URL</label>
+    <input type="text" id="serverUrl" list="urlHistory" value="nats://localhost:4222"
+           placeholder="nats://localhost:4222" autocorrect="off" autocapitalize="off" spellcheck="false" />
+
+    <div class="field-group">
+      <label>Authentication <span class="muted-xs">(optional)</span></label>
+      <input type="text" id="authUser" placeholder="Username" autocorrect="off" autocapitalize="off" spellcheck="false" />
+      <input type="password" id="authPass" placeholder="Password" />
+      <input type="password" id="authToken" placeholder="Token (overrides user/pass)" />
+    </div>
+
+    <div class="field-group">
+      <label for="credsFile">Or upload a .creds file</label>
+      <input type="file" id="credsFile" accept=".creds,.txt" />
+      <div id="credsHint" class="creds-hint" hidden>&#128273; Using credentials from profile</div>
+    </div>
+
+    <label class="check-row">
+      <input type="checkbox" id="saveCredsChk" />
+      <span>Remember credentials in profile <span class="muted-xs">(stored unencrypted)</span></span>
+    </label>
+
+    <button id="btnConnect" class="primary block">Connect</button>
+  </div>
+
+  <!-- ==================================================================== -->
+  <!-- TABS                                                                 -->
+  <!-- ==================================================================== -->
+  <nav class="tabs" id="tabBar" role="tablist" aria-label="Sections">
+    <button class="tab active" data-tab="msg" role="tab" aria-selected="true" aria-controls="panel-msg">Messaging</button>
+    <button class="tab" data-tab="kv" role="tab" aria-selected="false" aria-controls="panel-kv">KV Store</button>
+    <button class="tab" data-tab="stream" role="tab" aria-selected="false" aria-controls="panel-stream">Streams</button>
+  </nav>
+
+  <main class="workspace">
+
+    <!-- ================================================================== -->
+    <!-- MESSAGING                                                          -->
+    <!-- ================================================================== -->
+    <section class="tab-panel" data-tab-panel="msg" id="panel-msg" role="tabpanel">
+      <div class="panes panes-msg" data-panes="msg">
+
+        <div class="pane pane-list">
+          <div class="pane-head">
+            <h3>Subscriptions <span id="subCount" class="accent">(0)</span></h3>
+          </div>
+          <div class="sub-add">
+            <div class="sub-add-row">
+              <input type="text" id="subSubject" list="subHistory" placeholder="subject.&gt;  (Enter to add)"
+                     autocorrect="off" autocapitalize="off" spellcheck="false" data-requires-conn />
+              <button id="btnSub" class="accent icon-btn" title="Subscribe" data-requires-conn>+</button>
+            </div>
+            <label class="check-row sub-add-opt" id="excludeSystemRow">
+              <input type="checkbox" id="excludeSystemChk" checked />
+              <span>Hide system subjects <span class="muted-xs">($JS, $SYS, $KV, _INBOX&#8230;)</span></span>
+            </label>
+          </div>
+          <ul id="subList" class="list-scroll"></ul>
+        </div>
+
+        <div class="splitter" data-col="0" role="separator" tabindex="0"
+             aria-orientation="vertical" aria-label="Resize Subscriptions pane"></div>
+
+        <div class="pane-main">
+
+          <div class="pane composer" id="composer">
+            <div class="pane-head">
+              <button id="btnComposerToggle" class="disclosure" aria-expanded="true">
+                <span class="chev" aria-hidden="true">&#9662;</span> Publish / Request
+              </button>
+              <div class="pane-actions">
+                <select id="templateSelect" class="sm-select" title="Message templates">
+                  <option value="">-- Templates --</option>
+                </select>
+                <button id="btnTemplateSave" class="sm-btn" title="Save subject/payload/headers as a template">Save</button>
+                <button id="btnTemplateDelete" class="sm-btn danger" title="Delete selected template">&#10005;</button>
+              </div>
+            </div>
+
+            <div class="composer-row">
+              <input type="text" id="pubSubject" list="subHistory" placeholder="Subject"
+                     autocorrect="off" autocapitalize="off" spellcheck="false" />
+              <span class="composer-send">
+                <button id="btnPub" class="primary" data-requires-conn>Pub</button>
+                <button id="btnReq" class="accent" data-requires-conn>Req</button>
+              </span>
+            </div>
+
+            <div class="composer-body" id="composerBody">
+              <textarea id="pubPayload" placeholder="Payload (Ctrl+Enter to publish)"
+                        autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+
+              <div class="composer-opts">
+                <div class="composer-opts-group">
+                  <button id="btnHeaderToggle" class="disclosure sm" aria-expanded="false" aria-controls="headerContainer">
+                    <span class="chev" aria-hidden="true">&#9656;</span> Headers
+                    <span id="headerCount" class="pill-count" hidden>0</span>
+                  </button>
+                  <button id="btnFormatPayload" class="sm-btn" title="Pretty-print the payload as JSON">Format</button>
+                </div>
+                <label class="inline-field">
+                  Req timeout
+                  <input type="number" id="reqTimeout" value="2000" class="sm-input timeout"
+                         aria-label="Request timeout in milliseconds" /> ms
+                </label>
+              </div>
+
+              <div id="headerContainer" hidden>
+                <div id="headerRows" class="header-rows"></div>
+                <button id="btnHeaderAdd" class="sm-btn">+ Add header</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="pane log-pane">
+            <div class="pane-head">
+              <h3>Message Log
+                <button id="btnLogOrder" class="hint" title="Toggle whether new messages arrive at the bottom or the top">
+                  &#8681; newest last
+                </button>
+              </h3>
+              <div class="pane-actions">
+                <input type="text" id="logFilter" class="pane-filter inline" placeholder="Filter&#8230;"
+                       autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <button id="btnDownloadLogs" class="sm-btn" title="Download logs as JSON">&#8681;</button>
+                <button id="btnPause" class="sm-btn fixed-w">Pause</button>
+                <button id="btnClear" class="sm-btn">Clear</button>
+              </div>
+            </div>
+            <div class="log-wrap">
+              <div id="messages" class="list-scroll"></div>
+              <button id="btnJumpLatest" class="jump-latest" hidden>
+                <span id="jumpArrow" aria-hidden="true">&#8681;</span>
+                <span id="jumpCount">0</span> new
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================== -->
+    <!-- KV STORE                                                           -->
+    <!-- ================================================================== -->
+    <section class="tab-panel" data-tab-panel="kv" id="panel-kv" role="tabpanel" hidden>
+      <div class="panes panes-kv" data-panes="kv">
+
+        <div class="pane pane-list">
+          <div class="pane-head">
+            <h3>Buckets</h3>
+            <div class="pane-actions">
+              <button id="btnKvCreate" class="sm-btn" title="Create bucket" data-requires-conn>+</button>
+              <button id="btnKvRefresh" class="sm-btn" title="Refresh bucket list" data-requires-conn>&#10227;</button>
+            </div>
+          </div>
+          <input type="text" id="kvBucketFilter" class="pane-filter" placeholder="Filter buckets&#8230;"
+                 autocorrect="off" autocapitalize="off" spellcheck="false" />
+          <div id="kvBucketList" class="list-scroll"><div class="empty">Not connected</div></div>
+        </div>
+
+        <div class="splitter" data-col="0" role="separator" tabindex="0"
+             aria-orientation="vertical" aria-label="Resize Buckets pane"></div>
+
+        <div class="pane pane-list">
+          <div class="pane-head">
+            <h3 id="kvBucketLabel">Keys</h3>
+            <div class="pane-actions">
+              <button id="btnKvEdit" class="sm-btn" title="Edit bucket configuration" disabled>Config</button>
+              <button id="btnKvDeleteBucket" class="sm-btn danger" title="Delete bucket and all its data" disabled>Delete</button>
+            </div>
+          </div>
+          <input type="text" id="kvFilter" class="pane-filter" placeholder="Filter keys&#8230;"
+                 autocorrect="off" autocapitalize="off" spellcheck="false" />
+          <div id="kvKeyList" class="list-scroll"><div class="empty">Select a bucket</div></div>
+        </div>
+
+        <div class="splitter" data-col="1" role="separator" tabindex="0"
+             aria-orientation="vertical" aria-label="Resize Keys pane"></div>
+
+        <div class="pane pane-detail">
+          <div id="kvEmptyState" class="empty empty-fill">Select a bucket to browse keys</div>
+
+          <div id="kvDetailView" class="detail-body" hidden>
+            <div class="pane-head">
+              <div class="key-row">
+                <input type="text" id="kvKeyInput" class="key-input" placeholder="key.name"
+                       autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <button id="btnKvGet" class="sm-btn" title="Load this key">Get</button>
+              </div>
+            </div>
+
+            <nav class="subtabs" data-subtabs="kv" role="tablist" aria-label="Key detail">
+              <button class="subtab active" data-subtab="value" role="tab" aria-selected="true">Value</button>
+              <button class="subtab" data-subtab="history" role="tab" aria-selected="false">
+                History <span id="kvHistoryCount" class="pill-count">0</span>
+              </button>
+            </nav>
+
+            <div class="subtab-panel" data-subtab-panel="value" role="tabpanel">
+              <div class="mini-toolbar">
+                <button id="btnKvToggleMode" class="sm-btn fixed-w-lg">&#9998; Edit</button>
+                <button id="btnKvCopy" class="sm-btn">Copy</button>
+                <button id="btnKvFormat" class="sm-btn" title="Pretty-print the value as JSON" hidden>Format</button>
+                <span id="kvRevLabel" class="muted-xs push-right"></span>
+              </div>
+              <textarea id="kvValueInput" class="value-edit" placeholder="Value"
+                        autocorrect="off" autocapitalize="off" spellcheck="false" hidden></textarea>
+              <pre id="kvValueHighlighter" class="value-view"></pre>
+            </div>
+
+            <div class="subtab-panel" data-subtab-panel="history" role="tabpanel" hidden>
+              <div id="kvHistoryList" class="list-scroll">
+                <div class="empty">Select a key to view its revisions</div>
+              </div>
+            </div>
+
+            <div class="pane-foot">
+              <span id="kvStatus" class="foot-status"></span>
+              <button id="btnKvPurge" class="sm-btn danger" title="Remove key AND its revision history">Purge</button>
+              <button id="btnKvDelete" class="sm-btn danger" title="Delete key (history is kept)">Delete</button>
+              <button id="btnKvPut" class="primary">Put / Update</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ================================================================== -->
+    <!-- STREAMS                                                            -->
+    <!-- ================================================================== -->
+    <section class="tab-panel" data-tab-panel="stream" id="panel-stream" role="tabpanel" hidden>
+      <div class="panes panes-stream" data-panes="stream">
+
+        <div class="pane pane-list">
+          <div class="pane-head">
+            <h3>Streams</h3>
+            <div class="pane-actions">
+              <button id="btnStreamCreate" class="sm-btn" title="Create stream" data-requires-conn>+</button>
+              <button id="btnStreamRefresh" class="sm-btn" title="Refresh stream list" data-requires-conn>&#10227;</button>
+            </div>
+          </div>
+          <input type="text" id="streamFilter" class="pane-filter" placeholder="Filter streams&#8230;"
+                 autocorrect="off" autocapitalize="off" spellcheck="false" />
+          <div id="streamList" class="list-scroll"><div class="empty">Not connected</div></div>
+        </div>
+
+        <div class="splitter" data-col="0" role="separator" tabindex="0"
+             aria-orientation="vertical" aria-label="Resize Streams pane"></div>
+
+        <div class="pane pane-detail">
+          <div id="streamEmptyState" class="empty empty-fill">Select a stream to view details</div>
+
+          <div id="streamDetailView" class="detail-body" hidden>
+            <div class="pane-head detail-head">
+              <div class="detail-title">
+                <h2 id="streamNameTitle">Stream</h2>
+                <span id="streamCreated" class="muted-xs"></span>
+              </div>
+              <div class="pane-actions">
+                <button id="btnStreamEdit" class="sm-btn">Edit config</button>
+                <button id="btnStreamPurge" class="sm-btn warn">Purge</button>
+                <button id="btnStreamDelete" class="sm-btn danger">Delete</button>
+              </div>
+            </div>
+
+            <nav class="subtabs" data-subtabs="stream" role="tablist" aria-label="Stream detail">
+              <button class="subtab active" data-subtab="overview" role="tab" aria-selected="true">Overview</button>
+              <button class="subtab" data-subtab="consumers" role="tab" aria-selected="false">
+                Consumers <span id="consumerTabCount" class="pill-count">0</span>
+              </button>
+              <button class="subtab" data-subtab="messages" role="tab" aria-selected="false">Messages</button>
+            </nav>
+
+            <div class="subtab-panel scrolls" data-subtab-panel="overview" role="tabpanel">
+              <div class="info-grid">
+                <div class="info-item wide"><label>Subjects</label><span id="streamSubjects" class="accent">-</span></div>
+                <div class="info-item"><label>Storage</label><span id="streamStorage">-</span></div>
+                <div class="info-item"><label>Retention</label><span id="streamRetention">-</span></div>
+                <div class="info-item"><label>Messages</label><span id="streamMsgs">-</span></div>
+                <div class="info-item"><label>Bytes</label><span id="streamBytes">-</span></div>
+                <div class="info-item"><label>First Seq</label><span id="streamFirstSeq">-</span></div>
+                <div class="info-item"><label>Last Seq</label><span id="streamLastSeq">-</span></div>
+                <div class="info-item"><label>Consumers</label><span id="streamConsumerCount">-</span></div>
+              </div>
+            </div>
+
+            <div class="subtab-panel" data-subtab-panel="consumers" role="tabpanel" hidden>
+              <div class="mini-toolbar">
+                <button id="btnConsumerCreate" class="sm-btn">+ Consumer</button>
+                <button id="btnLoadConsumers" class="sm-btn">&#10227; Refresh</button>
+              </div>
+              <div id="consumerList" class="list-scroll"></div>
+            </div>
+
+            <div class="subtab-panel" data-subtab-panel="messages" role="tabpanel" hidden>
+              <div class="mini-toolbar wrap">
+                <input type="text" id="msgSubjectFilter" class="sm-input subj" placeholder="Subject filter (orders.&gt;)"
+                       autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <span class="seq-group">
+                  <input type="number" id="msgStartSeq" class="sm-input seq" placeholder="Start" aria-label="Start sequence" />
+                  <span class="dash">&#8211;</span>
+                  <input type="number" id="msgEndSeq" class="sm-input seq" placeholder="End" aria-label="End sequence" />
+                </span>
+                <button id="btnStreamViewMsgs" class="sm-btn">Load</button>
+                <button id="btnStreamTail" class="sm-btn fixed-w-lg" title="Live-follow new messages">&#9654; Tail</button>
+                <button id="btnStreamClearMsgs" class="sm-btn">Clear</button>
+                <input type="text" id="streamMsgFilter" class="pane-filter inline push-right" placeholder="Filter loaded&#8230;"
+                       autocorrect="off" autocapitalize="off" spellcheck="false" />
+              </div>
+              <div id="streamMsgContainer" class="list-scroll">
+                <div class="empty">Click Load to view stream messages</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

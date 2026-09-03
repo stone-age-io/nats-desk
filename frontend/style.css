@@ -1,0 +1,1068 @@
+/* ==========================================================================
+   NATS CLIENT - STYLES
+   Layout model: app-bar / tabs / workspace, with each tab owning a `.panes`
+   grid of `.pane` columns. Every pane owns exactly ONE scroll region
+   (`.list-scroll`) so scrolling is never nested.
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* `hidden` must beat the flex/grid display rules below */
+[hidden] { display: none !important; }
+
+:root {
+  --bg: #0a0a0a;
+  --panel: #161616;
+  --panel-2: #0d1117;
+  --border: #30363d;
+  --border-soft: #21262d;
+  --input-bg: #050505;
+  --text: #e0e0e0;
+  --muted: #8b949e;
+  --muted-dim: #6e7681;
+
+  --primary: #3fb950;
+  --primary-hover: #2ea043;
+  --accent: #58a6ff;
+  --accent-solid: #1f6feb;
+  --danger: #f85149;
+  --warn: #d29922;
+
+  /* Stone-Age.io brand indigo, sampled from the helpdesk icon. Logo only -
+     deliberately not part of the UI palette. */
+  --brand: #4f46e5;
+
+  /* Spacing scale - use these, not arbitrary pixel values */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+
+  --bar-h: 48px;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+/* --------------------------------------------------------------------------
+   BASE
+   -------------------------------------------------------------------------- */
+
+html { height: 100%; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+h1, h2, h3 { margin: 0; }
+h2 { font-size: 1rem; color: var(--primary); font-weight: 700; }
+h3 {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--muted); font-weight: 600; white-space: nowrap;
+}
+
+.accent { color: var(--accent); }
+.muted-xs { font-size: 0.7rem; color: var(--muted-dim); font-weight: 400; }
+.push-right { margin-left: auto; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* --------------------------------------------------------------------------
+   APP BAR
+   -------------------------------------------------------------------------- */
+
+.app-bar {
+  height: var(--bar-h);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 var(--s4);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex; align-items: center; gap: var(--s2);
+  font-size: 0.95rem; font-weight: 700; color: #fff;
+  letter-spacing: 0.5px; white-space: nowrap;
+}
+/* currentColor so the mark can be retinted per theme, like the helpdesk component */
+.brand-mark { width: 22px; height: 22px; flex-shrink: 0; display: block; color: var(--brand); }
+
+.bar-spacer { flex: 1; }
+
+.bar-select {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  max-width: 180px;
+}
+.bar-select.sm { max-width: 150px; }
+
+/* Connection status pill - opens the connection popover.
+   The server/profile name is the only part that can be arbitrarily long, so
+   it is the only part allowed to give: it ellipses into whatever room is
+   left while the state, RTT and caret keep their size. `min-width: 0` is what
+   makes that possible - without it the nowrap contents set a floor and the
+   whole pill wraps onto its own row rather than shrinking. */
+.conn-pill {
+  display: flex; align-items: center; gap: var(--s2);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text);
+  font-weight: 500;
+  transition: border-color 0.15s, background 0.15s;
+  min-width: 0;
+  max-width: 360px;
+}
+.conn-pill > *:not(.conn-host) { flex-shrink: 0; }
+.conn-pill:hover { background: #21262d; border-color: var(--muted); }
+
+.conn-host {
+  font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conn-rtt  { font-family: var(--mono); font-size: 0.7rem;  color: var(--muted-dim); }
+.conn-caret { color: var(--muted-dim); font-size: 0.65rem; }
+
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #444; flex-shrink: 0; transition: all 0.3s;
+}
+.status-dot.connected    { background: var(--primary); box-shadow: 0 0 8px rgba(63,185,80,0.6); }
+.status-dot.reconnecting { background: var(--warn);    box-shadow: 0 0 8px rgba(210,153,34,0.6); }
+
+body[data-conn="connected"]    #statusText { color: var(--primary); }
+body[data-conn="reconnecting"] #statusText { color: var(--warn); }
+
+/* --------------------------------------------------------------------------
+   CONNECTION POPOVER
+   Native popover API, with a class-based fallback for browsers without it.
+   Kept as separate rules so an unknown `:popover-open` doesn't void the set.
+   -------------------------------------------------------------------------- */
+
+.conn-popover {
+  position: fixed;
+  inset: auto var(--s4) auto auto;
+  top: calc(var(--bar-h) + var(--s2));
+  width: 380px;
+  max-width: calc(100vw - var(--s4) * 2);
+  margin: 0;
+  padding: var(--s4);
+  background: #1c2128;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+  color: var(--text);
+  display: none;
+}
+.conn-popover:popover-open { display: block; }
+.conn-popover.fallback-open { display: block; }
+.conn-popover::backdrop { background: transparent; }
+
+.field-group {
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--border-soft);
+}
+.creds-hint { font-size: 0.72rem; color: var(--accent); margin-top: var(--s1); }
+
+.check-row {
+  display: flex; align-items: flex-start; gap: var(--s2);
+  margin: var(--s3) 0; cursor: pointer;
+  font-size: 0.75rem; color: var(--muted); font-weight: 400;
+}
+.check-row input { width: auto; margin: 2px 0 0 0; }
+
+/* --------------------------------------------------------------------------
+   TABS
+   -------------------------------------------------------------------------- */
+
+.tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--s1);
+  padding: 0 var(--s4);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  background: transparent; border: none;
+  color: var(--muted);
+  padding: 10px 16px;
+  cursor: pointer; font-weight: 600; font-size: 0.85rem;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover:not(.active) { color: var(--text); }
+.tab.active { color: #fff; border-bottom-color: var(--accent); }
+
+/* --------------------------------------------------------------------------
+   WORKSPACE / PANES
+   -------------------------------------------------------------------------- */
+
+.workspace { flex: 1; min-height: 0; padding: var(--s3); overflow: hidden; }
+
+.tab-panel { height: 100%; min-height: 0; }
+
+/* Column widths are custom properties so a splitter can override one without
+   the JS having to know the rest of the template. The fallback in each
+   `var()` IS the default layout - it stays declared here, in CSS.
+   Gap is 0 because the splitter track supplies the gutter itself.
+
+   Each width is wrapped in clamp() so the bounds are enforced by layout, not
+   by a resize handler: a saved width that no longer fits is corrected the
+   moment the grid is measured, whether that is a window resize, a tab being
+   revealed, or a reload at a narrower size. The stored value is left alone,
+   so widening the window restores what the user actually asked for.
+   MIN_COL / MIN_FLEX in splitters.js mirror these two. */
+.panes {
+  display: grid;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  --gutter: var(--s3);
+  --min-col: 140px;   /* below this a pane head clips its buttons */
+  --min-flex: 280px;  /* the last column never gets squeezed past this */
+}
+
+.panes-msg {
+  grid-template-columns:
+    clamp(var(--min-col), var(--c0, 260px), calc(100% - var(--gutter) - var(--min-flex)))
+    var(--gutter)
+    minmax(0, 1fr);
+}
+.panes-stream {
+  grid-template-columns:
+    clamp(var(--min-col), var(--c0, 240px), calc(100% - var(--gutter) - var(--min-flex)))
+    var(--gutter)
+    minmax(0, 1fr);
+}
+/* Two resizable columns, so each one's ceiling has to account for the other */
+.panes-kv {
+  grid-template-columns:
+    clamp(var(--min-col), var(--c0, 200px), calc(100% - var(--gutter) * 2 - var(--c1, 240px) - var(--min-flex)))
+    var(--gutter)
+    clamp(var(--min-col), var(--c1, 240px), calc(100% - var(--gutter) * 2 - var(--c0, 200px) - var(--min-flex)))
+    var(--gutter)
+    minmax(0, 1fr);
+}
+
+/* --------------------------------------------------------------------------
+   SPLITTERS
+   A splitter occupies the gutter track between two panes and writes the
+   width of the pane on its left into --c{data-col} on the grid.
+   -------------------------------------------------------------------------- */
+
+.splitter {
+  position: relative;
+  cursor: col-resize;
+  /* the pointer drag must not scroll the page out from under it */
+  touch-action: none;
+}
+
+/* The grab line is a 4px bar centred in the 12px gutter, so the visible
+   spacing between panes is identical to the old fixed-gap layout. */
+.splitter::before {
+  content: "";
+  position: absolute;
+  inset: 0 calc(50% - 2px);
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.splitter:hover::before,
+.splitter:focus-visible::before { background: var(--accent-solid); }
+.splitter.dragging::before      { background: var(--accent); }
+.splitter:focus-visible         { outline: none; }
+
+/* While dragging, the cursor and the no-select need to survive leaving the
+   4px handle - pointer capture keeps the events, this keeps the feedback. */
+body.resizing { cursor: col-resize; user-select: none; }
+
+.pane {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Messaging right column stacks the composer above the log */
+.pane-main {
+  display: flex; flex-direction: column; gap: var(--s3);
+  min-height: 0; min-width: 0;
+}
+.composer { flex-shrink: 0; }
+.log-pane { flex: 1; min-height: 0; }
+
+/* Positioning context for the jump-to-latest pill */
+.log-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Sits at the end of the log where new messages land, so the arrow always
+   points the way the click will actually travel. Newest-first puts that end
+   at the top - see .at-top below. */
+.jump-latest {
+  position: absolute; bottom: var(--s3);
+  /* Centred with auto margins, not translateX(-50%): the press effect on
+     button:active sets its own transform, which would replace the centering
+     and throw the pill half its width to the right on mousedown - far enough
+     that the mouseup lands outside it and the click never registers. */
+  left: 0; right: 0; margin-inline: auto; width: fit-content;
+  z-index: 5; padding: 5px 14px; border-radius: 100px;
+  background: var(--accent-solid); color: #fff; border: none;
+  font-size: 0.74rem; box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+}
+.jump-latest.at-top { top: var(--s3); bottom: auto; box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
+.jump-latest:hover { background: #388bfd; color: #fff; }
+
+.pane-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+  min-height: 40px;
+}
+.pane-actions { display: flex; align-items: center; gap: var(--s1); flex-shrink: 0; }
+
+.pane-foot {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.foot-status {
+  margin-right: auto; font-size: 0.75rem; color: var(--accent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.foot-status.is-error { color: var(--danger); }
+
+/* The single scroll region each pane is allowed */
+.list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--panel-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Also used as the log-direction toggle button, hence the pointer + hover */
+.hint {
+  font-size: 0.62rem; color: var(--muted-dim);
+  background: transparent;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+  padding: 1px 5px; margin-left: var(--s1); min-height: 0;
+  text-transform: none; letter-spacing: 0; cursor: pointer; white-space: nowrap;
+  font-weight: 600;
+}
+.hint:hover { color: var(--text); border-color: var(--muted-dim); background: transparent; }
+
+.pill-count {
+  display: inline-block;
+  background: var(--border-soft); color: var(--muted);
+  border-radius: 100px; padding: 0 6px;
+  font-size: 0.65rem; font-family: var(--mono); margin-left: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   DETAIL PANES + SUBTABS
+   -------------------------------------------------------------------------- */
+
+.pane-detail { position: relative; }
+
+.detail-body {
+  display: flex; flex-direction: column;
+  height: 100%; min-height: 0;
+}
+.detail-head { align-items: flex-start; }
+.detail-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.subtabs {
+  display: flex; gap: var(--s1);
+  padding: 0 var(--s3);
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.subtab {
+  background: transparent; border: none;
+  color: var(--muted); cursor: pointer;
+  padding: 7px 10px;
+  font-size: 0.78rem; font-weight: 600;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.subtab:hover:not(.active) { color: var(--text); }
+.subtab.active { color: #fff; border-bottom-color: var(--primary); }
+.subtab.active .pill-count { background: rgba(63,185,80,0.2); color: var(--primary); }
+
+.subtab-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s3);
+  gap: var(--s2);
+}
+.subtab-panel.scrolls { overflow-y: auto; }
+
+.mini-toolbar {
+  display: flex; align-items: center; gap: var(--s2);
+  flex-shrink: 0;
+}
+.mini-toolbar.wrap { flex-wrap: wrap; row-gap: var(--s2); }
+
+.key-row { display: flex; gap: var(--s2); flex: 1; min-width: 0; }
+.key-input { flex: 1; min-width: 0; margin: 0; font-weight: 600; }
+
+.value-view, .value-edit {
+  flex: 1; min-height: 0;
+  margin: 0;
+  padding: var(--s3);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono); font-size: 0.8rem; line-height: 1.5;
+  overflow: auto;
+  white-space: pre-wrap; word-break: break-word;
+  color: #c9d1d9;
+}
+.value-edit { resize: none; width: 100%; }
+
+/* --------------------------------------------------------------------------
+   FORMS
+   -------------------------------------------------------------------------- */
+
+label {
+  display: block; margin-bottom: var(--s1);
+  font-size: 0.72rem; color: var(--muted); font-weight: 600;
+}
+
+input, textarea, select {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  margin-bottom: var(--s2);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus, textarea:focus, select:focus, button:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(88,166,255,0.15);
+}
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+input:disabled, textarea:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+textarea { resize: vertical; min-height: 80px; line-height: 1.4; }
+
+.input-error {
+  border-color: var(--danger) !important;
+  background: rgba(248,81,73,0.05) !important;
+}
+
+input[type="file"] { padding: 5px; cursor: pointer; }
+input[type="file"]::file-selector-button {
+  background: #21262d; color: #c9d1d9;
+  border: 1px solid rgba(240,246,252,0.1);
+  padding: 5px 10px; border-radius: var(--radius-sm);
+  margin-right: var(--s3); cursor: pointer;
+  font-weight: 600; font-family: var(--font); font-size: 0.72rem;
+}
+input[type="file"]::file-selector-button:hover { background: #30363d; color: #fff; }
+
+/* Filter inputs sit flush inside pane headers */
+.pane-filter {
+  margin: 0;
+  padding: 5px 8px;
+  font-size: 0.78rem;
+  border-radius: 0;
+  border-width: 0 0 1px 0;
+  background: var(--panel);
+  flex-shrink: 0;
+}
+.pane-filter:focus { box-shadow: none; border-bottom-color: var(--accent); }
+.pane-filter.inline {
+  width: 150px;
+  border-width: 1px;
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+}
+
+.sm-input { padding: 5px 8px; font-size: 0.78rem; margin: 0; }
+.sm-input.timeout { width: 70px; text-align: center; flex-shrink: 0; }
+.sm-input.subj { width: 190px; }
+.sm-input.seq  { width: 78px; text-align: center; }
+.seq-group { display: flex; align-items: center; gap: var(--s1); }
+.dash { color: var(--muted-dim); }
+
+/* --------------------------------------------------------------------------
+   BUTTONS
+   -------------------------------------------------------------------------- */
+
+button {
+  background: #21262d; color: #c9d1d9;
+  border: 1px solid rgba(240,246,252,0.1);
+  padding: 7px 14px; border-radius: var(--radius-sm);
+  cursor: pointer; font-weight: 600; font-size: 0.82rem;
+  font-family: inherit; line-height: 1.4;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+button:hover:not(:disabled) { background: #30363d; border-color: var(--muted); color: #fff; }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+button.primary { background: var(--primary); color: #fff; border-color: rgba(240,246,252,0.1); }
+button.primary:hover:not(:disabled) { background: var(--primary-hover); }
+
+button.accent { background: var(--accent-solid); color: #fff; border-color: transparent; }
+button.accent:hover:not(:disabled) { background: #388bfd; }
+
+button.block { width: 100%; margin-top: var(--s2); }
+
+button.sm-btn {
+  padding: 4px 9px; font-size: 0.74rem;
+  background: transparent; border: 1px solid var(--border);
+}
+button.sm-btn:hover:not(:disabled) { background: #21262d; }
+
+/* Select sized as a button, for toolbars where it sits in a row of them.
+   .bar-select is styled as an input - mono, larger, filled, and carrying the
+   shared input margin-bottom that lifted it off its neighbours' baseline. */
+select.sm-select {
+  width: auto; max-width: 150px; margin: 0;
+  padding: 4px 9px;
+  font-family: inherit; font-size: 0.74rem; font-weight: 600; line-height: 1.4;
+  color: #c9d1d9; background: transparent;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+select.sm-select:hover { background: #21262d; border-color: var(--muted); }
+select.sm-select option { background: var(--panel); color: var(--text); }
+
+button.danger { color: var(--danger); border-color: rgba(248,81,73,0.4); background: transparent; }
+button.danger:hover:not(:disabled) { background: rgba(248,81,73,0.1); border-color: var(--danger); color: var(--danger); }
+
+button.warn { color: var(--warn); border-color: rgba(210,153,34,0.4); background: transparent; }
+button.warn:hover:not(:disabled) { background: rgba(210,153,34,0.1); border-color: var(--warn); color: var(--warn); }
+
+button.paused { background: rgba(210,153,34,0.2); color: var(--warn); border-color: var(--warn); }
+
+button.icon-btn {
+  padding: 0; width: 32px; height: 32px; font-size: 1.1rem;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+
+/* Fixed widths stop toggle buttons from resizing when their label changes */
+button.fixed-w    { width: 62px; }
+button.fixed-w-lg { width: 74px; }
+
+/* Disclosure toggles (composer, headers) */
+button.disclosure {
+  background: transparent; border: none; padding: 0;
+  color: var(--muted); font-size: 0.72rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 1px;
+  display: flex; align-items: center; gap: var(--s1);
+}
+button.disclosure:hover { background: transparent; color: var(--text); }
+button.disclosure.sm {
+  text-transform: none; letter-spacing: 0; font-size: 0.75rem;
+  align-self: flex-start; margin-top: var(--s1);
+}
+.chev { font-size: 0.6rem; }
+
+.copy-btn {
+  background: transparent; border: none; color: var(--muted-dim);
+  cursor: pointer; padding: 2px 6px; font-size: 0.7rem; font-weight: 500;
+}
+.copy-btn:hover { color: var(--accent); background: rgba(88,166,255,0.1); border-color: transparent; }
+
+/* --------------------------------------------------------------------------
+   COMPOSER
+   -------------------------------------------------------------------------- */
+
+.composer-row {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s3);
+}
+/* One height across the templates group. A <select> and a <button> derive
+   their heights differently, so left to themselves they land a pixel or two
+   apart and the row reads as misaligned. */
+.composer .pane-head .pane-actions > * { height: 28px; }
+
+.composer-row #pubSubject { margin: 0; flex: 1; min-width: 0; }
+.composer-send { display: flex; gap: var(--s2); flex-shrink: 0; }
+
+/* Collapsed: the title bar and nothing else. The template controls go too -
+   they load into fields that are no longer on screen. */
+.composer.is-collapsed .composer-row,
+.composer.is-collapsed .composer-body,
+.composer.is-collapsed .pane-actions { display: none; }
+.composer.is-collapsed .pane-head { border-bottom: none; }
+
+.composer-body {
+  display: flex; flex-direction: column;
+  padding: 0 var(--s3) var(--s3);
+}
+.composer-body textarea { margin-bottom: 0; }
+
+/* Headers disclosure on the left, request timeout on the right - the timeout
+   only affects Req, so it does not belong on the subject line */
+.composer-opts {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s3); margin-top: var(--s2); flex-wrap: wrap;
+}
+.composer-opts-group { display: flex; align-items: center; gap: var(--s3); }
+.composer-opts-group .disclosure.sm { align-self: center; margin-top: 0; }
+
+.inline-field {
+  display: flex; align-items: center; gap: var(--s1); margin: 0;
+  font-size: 0.72rem; color: var(--muted); font-weight: 600;
+}
+.inline-field .timeout { width: 64px; }
+
+.composer-body #headerContainer { margin-top: var(--s2); }
+
+.header-rows { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s2); }
+.header-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  gap: var(--s2); align-items: center;
+}
+.header-row input { margin: 0; }
+.header-row .header-remove { padding: 4px 8px; }
+
+/* --------------------------------------------------------------------------
+   LISTS: subscriptions, buckets, keys, streams
+   -------------------------------------------------------------------------- */
+
+#subList li {
+  border-bottom: 1px solid var(--border-soft);
+  border-left: 3px solid transparent;
+  padding: 7px 10px;
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s2);
+}
+#subList li:hover { background: var(--border-soft); }
+#subList li span {
+  font-family: var(--mono); font-size: 0.78rem; color: #c9d1d9;
+  word-break: break-all; cursor: pointer;
+}
+#subList li button { padding: 2px 7px; font-size: 0.7rem; flex-shrink: 0; }
+
+.sub-add {
+  display: flex; flex-direction: column; gap: var(--s1);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.sub-add-row { display: flex; gap: var(--s2); }
+.sub-add-row input { margin: 0; min-width: 0; }
+
+/* Tighter than the connection popover's check rows - this one sits in a
+   cramped pane header, not a dialog */
+.sub-add-opt { margin: 0; align-items: center; font-size: 0.72rem; }
+.sub-add-opt input { margin: 0; }
+.sub-add-opt.is-disabled { opacity: 0.45; cursor: not-allowed; }
+.sub-add-opt.is-disabled input { cursor: not-allowed; }
+
+/* Marks a subscription that is dropping $/_ traffic, so an absent $JS event
+   reads as "filtered" rather than "broken" */
+.sub-tag {
+  font-family: var(--font); font-style: normal;
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; white-space: nowrap;
+  color: var(--muted); background: var(--border-soft);
+  border-radius: 3px; padding: 1px 4px; vertical-align: 1px;
+}
+
+/* Shared row style for bucket / key / stream lists */
+.list-row {
+  padding: 7px 10px;
+  cursor: pointer;
+  font-family: var(--mono); font-size: 0.78rem;
+  color: var(--text); word-break: break-all;
+  border-left: 3px solid transparent;
+}
+.list-row:hover { background: var(--border-soft); color: #fff; }
+.list-row.active {
+  background: rgba(88,166,255,0.12);
+  border-left-color: var(--accent);
+  color: var(--accent); font-weight: 600;
+}
+
+.empty {
+  color: var(--muted-dim); font-style: italic;
+  padding: var(--s5) var(--s4); text-align: center; font-size: 0.82rem;
+}
+.empty.is-error { color: var(--danger); font-style: normal; }
+.empty-fill {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* --------------------------------------------------------------------------
+   KV HISTORY
+   -------------------------------------------------------------------------- */
+
+.kv-history-row {
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s3);
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.78rem;
+}
+.kv-history-row:hover { background: var(--border-soft); }
+.kv-history-row .rev { color: var(--accent); font-family: var(--mono); white-space: nowrap; }
+.kv-history-row .when { color: var(--muted-dim); font-size: 0.72rem; white-space: nowrap; }
+
+/* --------------------------------------------------------------------------
+   CONSUMERS
+   -------------------------------------------------------------------------- */
+
+.consumer-row {
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s2);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.78rem;
+}
+.consumer-row:hover { background: var(--border-soft); }
+.consumer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.consumer-name.durable { color: var(--accent); font-weight: 700; }
+.consumer-name.ephemeral { color: var(--muted); }
+.consumer-stats {
+  font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
+  white-space: nowrap; display: flex; gap: var(--s2);
+}
+.consumer-stats .hot { color: var(--warn); }
+.consumer-actions { display: flex; gap: var(--s1); flex-shrink: 0; }
+.consumer-right { display: flex; align-items: center; gap: var(--s3); flex-shrink: 0; }
+
+/* --------------------------------------------------------------------------
+   MESSAGE ENTRIES (log + stream)
+   -------------------------------------------------------------------------- */
+
+#messages { padding: var(--s3); font-family: var(--mono); font-size: 0.8rem; }
+
+.msg-entry {
+  margin-bottom: var(--s3);
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: var(--s2);
+  animation: fadeIn 0.1s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+.msg-meta {
+  margin-bottom: var(--s1); color: var(--muted); font-size: 0.75em;
+  display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap;
+}
+.msg-subject { color: #ddd; font-weight: 700; }
+
+/* Headers render as a name/value grid rather than a comma-joined line */
+.msg-headers { margin-top: var(--s1); font-size: 0.75em; color: var(--muted); }
+.hdr-grid {
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--s3); margin-top: var(--s1); padding-left: var(--s1);
+  border-left: 2px solid var(--border-soft);
+}
+.hdr-key { color: var(--muted); white-space: nowrap; }
+.hdr-value { color: #c9d1d9; word-break: break-word; }
+
+.badge {
+  padding: 2px 6px; border-radius: 10px; font-weight: 600;
+  font-size: 0.7em; letter-spacing: 0.5px; text-transform: uppercase;
+}
+.badge-sub { background: rgba(63,185,80,0.2);  color: #56d364; border: 1px solid rgba(63,185,80,0.4); }
+.badge-rpc { background: rgba(88,166,255,0.2); color: #79c0ff; border: 1px solid rgba(88,166,255,0.4); }
+.badge-hdr { background: rgba(210,153,34,0.2); color: #e3b341; border: 1px solid rgba(210,153,34,0.4); padding: 1px 5px; }
+
+pre { margin: 0; color: #c9d1d9; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+
+.stream-msg-entry {
+  border-bottom: 1px solid var(--border-soft);
+  padding: var(--s2) var(--s3);
+  font-size: 0.82rem; font-family: var(--mono);
+}
+.stream-msg-head {
+  display: flex; justify-content: space-between; align-items: center;
+  color: var(--accent); margin-bottom: var(--s1);
+}
+.stream-msg-head .when { color: var(--muted-dim); font-size: 0.9em; }
+.stream-msg-subject { color: #ddd; font-weight: 700; margin-bottom: var(--s1); }
+.stream-msg-body { position: relative; }
+.stream-msg-body .copy-btn { position: absolute; top: 0; right: 0; }
+.stream-msg-body pre { font-size: 0.8em; color: #aaa; padding-top: 22px; }
+
+/* --------------------------------------------------------------------------
+   STREAM OVERVIEW GRID
+   -------------------------------------------------------------------------- */
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s3);
+  align-content: start;
+}
+.info-item {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-soft);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+.info-item.wide { grid-column: 1 / -1; }
+.info-item label { margin-bottom: 2px; font-size: 0.68rem; }
+.info-item span { font-family: var(--mono); font-size: 0.88rem; word-break: break-all; }
+
+/* --------------------------------------------------------------------------
+   DIALOGS (native <dialog>)
+   -------------------------------------------------------------------------- */
+
+dialog.app-dialog {
+  background: #1c2128;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 0;
+  width: 600px;
+  max-width: calc(100vw - var(--s5) * 2);
+  max-height: calc(100vh - var(--s5) * 2);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+  overflow: hidden;
+}
+dialog.app-dialog.narrow { width: 440px; }
+dialog.app-dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(2px); }
+
+.dialog-form { display: flex; flex-direction: column; max-height: inherit; min-height: 0; }
+
+.dialog-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.dialog-head h3 { font-size: 0.8rem; color: var(--text); }
+
+.dialog-body {
+  padding: var(--s4);
+  overflow-y: auto;
+  min-height: 0;
+  display: flex; flex-direction: column;
+}
+.dialog-body > :last-child { margin-bottom: 0; }
+.dialog-message { font-size: 0.88rem; line-height: 1.5; color: var(--text); white-space: pre-wrap; }
+.dialog-hint { font-size: 0.75rem; color: var(--muted); margin-bottom: var(--s2); }
+
+.dialog-body pre {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--s3);
+  max-height: 55vh; overflow: auto;
+  font-family: var(--mono); font-size: 0.78rem;
+}
+.dialog-body textarea.json-editor {
+  font-family: var(--mono); font-size: 0.8rem;
+  white-space: pre; min-height: 320px; margin-bottom: 0;
+  overflow-wrap: normal; overflow-x: auto;
+}
+
+.dialog-error {
+  color: var(--danger); font-size: 0.78rem;
+  margin-top: var(--s2);
+  background: rgba(248,81,73,0.08);
+  border: 1px solid rgba(248,81,73,0.3);
+  border-radius: var(--radius-sm);
+  padding: var(--s2);
+  white-space: pre-wrap;
+}
+
+.dialog-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  border-top: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   TOASTS
+   -------------------------------------------------------------------------- */
+
+#toast-container {
+  position: fixed; bottom: var(--s5); right: var(--s5); z-index: 2000;
+  display: flex; flex-direction: column; gap: var(--s3); pointer-events: none;
+}
+.toast {
+  background: #1f242c; color: #fff;
+  padding: 12px 16px; border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  border-left: 4px solid #555;
+  font-size: 0.85rem; min-width: 280px; max-width: 420px;
+  pointer-events: auto; word-break: break-word;
+  animation: slideInBottom 0.25s cubic-bezier(0.16,1,0.3,1) forwards;
+}
+.toast.success { border-left-color: var(--primary); }
+.toast.error   { border-left-color: var(--danger); }
+.toast.info    { border-left-color: var(--accent); }
+.toast.hiding  { animation: fadeOutRight 0.2s ease-in forwards; }
+
+@keyframes slideInBottom { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fadeOutRight  { to { transform: translateX(10px); opacity: 0; } }
+
+/* --------------------------------------------------------------------------
+   SYNTAX HIGHLIGHTING
+   -------------------------------------------------------------------------- */
+
+.key     { color: #79c0ff; }
+.string  { color: #a5d6ff; }
+.number  { color: #7ee787; }
+.boolean { color: #56d364; }
+.null    { color: #f85149; }
+
+/* --------------------------------------------------------------------------
+   SCROLLBARS
+   -------------------------------------------------------------------------- */
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 5px; border: 2px solid var(--panel-2); }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+/* --------------------------------------------------------------------------
+   RESPONSIVE
+   -------------------------------------------------------------------------- */
+
+/* Narrow desktop: drop the KV bucket column width, tighten panes */
+@media (max-width: 1200px) {
+  .panes-kv {
+    grid-template-columns:
+      clamp(var(--min-col), var(--c0, 170px), calc(100% - var(--gutter) * 2 - var(--c1, 200px) - var(--min-flex)))
+      var(--gutter)
+      clamp(var(--min-col), var(--c1, 200px), calc(100% - var(--gutter) * 2 - var(--c0, 170px) - var(--min-flex)))
+      var(--gutter)
+      minmax(0, 1fr);
+  }
+  .pane-filter.inline { width: 110px; }
+}
+
+/* Tablet and below: panes stack vertically and the page scrolls as a whole */
+@media (max-width: 900px) {
+  body { height: auto; min-height: 100vh; overflow: auto; }
+
+  .app-bar { flex-wrap: wrap; height: auto; padding: var(--s2) var(--s3); }
+  .bar-spacer { display: none; }
+
+  /* Flex breaks lines on content size before it shrinks anything, so a long
+     name pushes the whole pill onto a line of its own no matter how willing
+     that name is to ellipse. Basing the pill at 0 makes it always fit the
+     current line and then grow into whatever is left, up to the cap above. */
+  .conn-pill { flex: 1 1 0; }
+  .conn-popover { top: auto; bottom: var(--s3); left: var(--s3); right: var(--s3); width: auto; }
+
+  .workspace { overflow: visible; height: auto; }
+  .tab-panel { height: auto; }
+
+  /* Stacked panes have nothing to drag between, so the splitters go away and
+     the grid takes its gutter back as a plain row gap. */
+  .panes,
+  .panes-msg, .panes-kv, .panes-stream {
+    grid-template-columns: 1fr;
+    gap: var(--s3);
+    height: auto;
+  }
+  .splitter { display: none; }
+
+  .pane { height: auto; }
+  .pane-detail { min-height: 480px; }
+  .detail-body { height: auto; }
+  .subtab-panel { min-height: 320px; }
+
+  /* `flex: 1 1 0` collapses to nothing once the pane is height:auto, so scroll
+     regions have to opt out of flex sizing and state their own bounds here */
+  .list-scroll { flex: none; height: auto; }
+  .pane-list .list-scroll { min-height: 96px; max-height: 260px; }
+  .log-pane .list-scroll { min-height: 340px; max-height: 60vh; }
+  #consumerList, #streamMsgContainer { min-height: 260px; max-height: 60vh; }
+  .log-wrap { flex: none; }
+  .value-view, .value-edit { flex: none; height: 260px; }
+
+  .detail-head { flex-direction: column; align-items: stretch; gap: var(--s2); }
+
+  /* Headers carry a title plus a filter and several buttons - let them wrap
+     rather than forcing the pane wider than the screen */
+  .pane-head { flex-wrap: wrap; row-gap: var(--s2); }
+  .pane-actions { flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
+  .pane-filter.inline { width: auto; flex: 1 1 120px; min-width: 0; }
+  .mini-toolbar { flex-wrap: wrap; }
+  .mini-toolbar .push-right { margin-left: 0; flex: 1 1 100%; }
+
+  /* Composer: subject gets its own line, Pub/Req split the next one */
+  .composer-row { flex-wrap: wrap; }
+  .composer-row #pubSubject { flex: 1 1 100%; }
+  .composer-send { flex: 1 1 100%; }
+  .composer-send button { flex: 1; }
+
+  /* Keep the template controls together on one line under the title
+     instead of orphaning the delete button on a third row */
+  .composer .pane-head { flex-wrap: wrap; }
+  .composer .pane-head .pane-actions { flex: 1 1 100%; flex-wrap: nowrap; justify-content: flex-end; }
+  .composer .pane-head .sm-select { flex: 1; max-width: none; }
+
+  /* Header rows stack key over value so neither is squeezed */
+  .header-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .header-row .header-value { grid-column: 1 / -1; }
+  .hdr-grid { grid-template-columns: minmax(0, 1fr); gap: 0 0; }
+  .hdr-key { margin-top: var(--s1); }
+
+  /* 16px prevents iOS zoom-on-focus */
+  input, textarea, select { font-size: 16px; }
+  button:not(.hint):not(.copy-btn):not(.disclosure), .tab { min-height: 40px; }
+  .subtab { min-height: 38px; }
+}
+
+/* Phones: brand + pill will not both fit alongside Server info and still
+   leave the name a readable amount of room, so Server info takes its own
+   row and the pill spends the whole of the first one. Above this width all
+   three fit on one line, and forcing the split would just leave a stretched
+   full-width button. */
+@media (max-width: 480px) {
+  .conn-pill { max-width: none; }
+  #btnInfo { flex: 1 1 100%; }
+}
