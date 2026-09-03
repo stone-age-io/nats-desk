@@ -767,10 +767,10 @@ function handleKvCreate() {
     saveLabel: "Create",
     value: {
       bucket: "new-bucket",
-      history: 5,
       description: "My KV Bucket",
+      history: 5,
       storage: "file",
-      replicas: 1,
+      num_replicas: 1,
     },
     onSave: async (config) => {
       await nats.createKvBucket(config);
@@ -794,13 +794,13 @@ async function handleKvEdit() {
       hint: "Some fields cannot be changed after creation; the server will reject those.",
       value: {
         bucket: status.bucket,
+        description: status.description,
         history: status.history,
-        description: status.streamInfo.config.description || "",
-        storage: status.storage,
-        replicas: status.replicas,
         ttl: status.ttl,
-        maxBucketSize: status.streamInfo.config.max_bytes,
-        maxValueSize: status.streamInfo.config.max_msg_size,
+        max_bytes: status.max_bytes,
+        max_value_size: status.max_value_size,
+        storage: status.storage,
+        num_replicas: status.num_replicas,
       },
       onSave: async (config) => {
         await nats.updateKvBucket(config);

@@ -82,10 +82,24 @@ saved settings stay on the old one. Pick a port once.
   pause/resume, and a log direction toggle that only auto-follows when you are
   already at the live edge
 
+### JetStream KV
+- **Buckets:** create, edit and delete, editing the server's own config fields
+  rather than a translation layer
+- **Keys:** get, put, delete, and **purge** (purge also drops revision history)
+- **History:** every revision of a key, newest first
+- **Live watch:** the key list updates as other clients add and remove keys
+
+### JetStream streams
+- **Streams:** list, create, edit and delete; purge messages
+- **Consumers:** full config view and edit, with pending/waiting/ack counts
+- **Message inspector:** fetch by sequence range with an optional subject
+  filter, as a single batch rather than one request per message
+- **Live tail:** follow new messages as they arrive
+
 ### Coming
-KV browsing, JetStream stream and consumer management, `nats` CLI context
-import, and server monitoring via both `:8222` and the `$SYS` account. The UI
-tells you plainly when you reach something that isn't wired up yet.
+`nats` CLI context import, and server monitoring via both `:8222` and the
+`$SYS` account. The UI tells you plainly when you reach something that isn't
+wired up yet.
 
 ## Security
 

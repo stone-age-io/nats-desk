@@ -18,6 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/nats-io/nats.go"
+	"github.com/stone-age-io/nats-desk/internal/natsconn"
 )
 
 // A subscription to '>' on a busy server produces messages orders of
@@ -285,4 +286,34 @@ func (h *Hub) Stats(rttMillis float64) {
 		Type string  `json:"type"`
 		RTT  float64 `json:"rtt"`
 	}{Type: "stats", RTT: rttMillis})
+}
+
+// KvChange goes down the control path: key edits are rare and a dropped one
+// would leave the key list quietly out of date.
+func (h *Hub) KvChange(key, operation string) {
+	h.sendCtrl(struct {
+		Type      string `json:"type"`
+		Key       string `json:"key"`
+		Operation string `json:"operation"`
+	}{Type: "kv", Key: key, Operation: operation})
+}
+
+// TailMessage takes the batched path: tailing a busy stream is as much of a
+// firehose as a wildcard subscription.
+func (h *Hub) TailMessage(m natsconn.TailMsg) {
+	h.queueMsg(struct {
+		Type    string              `json:"type"`
+		Seq     uint64              `json:"seq"`
+		Subject string              `json:"subject"`
+		Data    string              `json:"data"`
+		Time    time.Time           `json:"time"`
+		Headers map[string][]string `json:"headers,omitempty"`
+	}{
+		Type:    "tail",
+		Seq:     m.Seq,
+		Subject: m.Subject,
+		Data:    base64.StdEncoding.EncodeToString(m.Data),
+		Time:    m.Time,
+		Headers: m.Headers,
+	})
 }

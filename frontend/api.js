@@ -324,44 +324,186 @@ function parseHeaders(jsonStr) {
 }
 
 // ============================================================================
-// NOT YET PORTED
+// KV STORE
 // ============================================================================
-// Phase 2 lands KV and JetStream. These throw rather than silently doing
-// nothing so a gap shows up as a toast instead of a dead button.
 
-const later = (what) => async () => {
-  throw new Error(`${what} is not available yet in nats-desk`);
-};
+/**
+ * Encode a KV key for use in a URL path.
+ *
+ * Keys may legitimately contain "/", and the route uses a trailing wildcard so
+ * that structure has to survive; everything else still needs escaping. So the
+ * key is split on "/" and each segment encoded separately.
+ */
+function keyPath(key) {
+  return String(key).split("/").map(encodeURIComponent).join("/");
+}
 
-export const getKvBuckets = later("KV");
-export const createKvBucket = later("KV");
-export const openKvBucket = later("KV");
-export const getKvStatus = later("KV");
-export const updateKvBucket = later("KV");
-export const watchKvBucket = later("KV");
-export const getKvValue = later("KV");
-export const getKvHistory = later("KV");
-export const putKvValue = later("KV");
-export const deleteKvValue = later("KV");
-export const purgeKvValue = later("KV");
-export const destroyKvBucket = later("KV");
+export async function getKvBuckets() {
+  return await get("/api/kv/buckets");
+}
 
-export const getStreams = later("Stream management");
-export const createStream = later("Stream management");
-export const updateStream = later("Stream management");
-export const getStreamInfo = later("Stream management");
-export const purgeStream = later("Stream management");
-export const deleteStream = later("Stream management");
-export const getConsumers = later("Consumer management");
-export const getConsumerInfo = later("Consumer management");
-export const createConsumer = later("Consumer management");
-export const updateConsumer = later("Consumer management");
-export const deleteConsumer = later("Consumer management");
-export const getStreamMessageRange = later("Stream messages");
-export const startStreamTail = later("Stream tail");
+export async function createKvBucket(config) {
+  return await post("/api/kv/buckets", config);
+}
+
+export async function updateKvBucket(config) {
+  return await call("PUT", "/api/kv/buckets", config);
+}
+
+export async function destroyKvBucket(bucket) {
+  return await del(`/api/kv/buckets/${encodeURIComponent(bucket)}`);
+}
+
+export async function openKvBucket(bucket) {
+  await connectWs();
+  return await post("/api/kv/open", { bucket });
+}
+
+export async function getKvStatus() {
+  return await get("/api/kv/status");
+}
+
+/**
+ * Watch the open bucket.
+ *
+ * The handler is registered before the backend is told to start, because the
+ * watcher replays every existing key the instant it opens - that replay is
+ * how the key list gets populated at all, so losing it means an empty list.
+ */
+export async function watchKvBucket(onKeyChange) {
+  await connectWs();
+  kvWatchHandler = onKeyChange;
+  await post("/api/kv/watch", {});
+  return {
+    stop() {
+      kvWatchHandler = null;
+      // Best effort: if the backend has already dropped the watcher (bucket
+      // closed, connection lost) there is nothing left to stop.
+      del("/api/kv/watch").catch(() => {});
+    },
+  };
+}
+
+export async function getKvValue(key) {
+  const res = await get(`/api/kv/keys/${keyPath(key)}`);
+  if (!res) return null;
+  return { value: decodePayload(res.value), revision: res.revision };
+}
+
+export async function getKvHistory(key) {
+  const hist = await get(`/api/kv/history/${keyPath(key)}`);
+  return (hist || []).map((e) => ({
+    revision: e.revision,
+    operation: e.operation,
+    value: e.value ? decodePayload(e.value) : null,
+    created: e.created,
+  }));
+}
+
+export async function putKvValue(key, value) {
+  return await call("PUT", `/api/kv/keys/${keyPath(key)}`, {
+    value: bytesToB64(encoder.encode(value)),
+  });
+}
+
+export async function deleteKvValue(key) {
+  return await del(`/api/kv/keys/${keyPath(key)}`);
+}
+
+export async function purgeKvValue(key) {
+  return await post(`/api/kv/purge/${keyPath(key)}`, {});
+}
+
+// ============================================================================
+// JETSTREAM - STREAMS
+// ============================================================================
+
+const streamPath = (name) => `/api/streams/${encodeURIComponent(name)}`;
+
+export async function getStreams() {
+  return await get("/api/streams");
+}
+
+export async function getStreamInfo(name) {
+  return await get(streamPath(name));
+}
+
+export async function createStream(config) {
+  return await post("/api/streams", config);
+}
+
+export async function updateStream(config) {
+  return await call("PUT", "/api/streams", config);
+}
+
+export async function purgeStream(name) {
+  return await post(`${streamPath(name)}/purge`, {});
+}
+
+export async function deleteStream(name) {
+  return await del(streamPath(name));
+}
+
+// ============================================================================
+// JETSTREAM - CONSUMERS
+// ============================================================================
+
+export async function getConsumers(stream) {
+  return await get(`${streamPath(stream)}/consumers`);
+}
+
+export async function getConsumerInfo(stream, consumer) {
+  return await get(`${streamPath(stream)}/consumers/${encodeURIComponent(consumer)}`);
+}
+
+export async function createConsumer(stream, config) {
+  return await post(`${streamPath(stream)}/consumers`, config);
+}
+
+export async function updateConsumer(stream, consumer, config) {
+  return await call("PUT", `${streamPath(stream)}/consumers/${encodeURIComponent(consumer)}`, config);
+}
+
+export async function deleteConsumer(stream, consumer) {
+  return await del(`${streamPath(stream)}/consumers/${encodeURIComponent(consumer)}`);
+}
+
+// ============================================================================
+// JETSTREAM - MESSAGES
+// ============================================================================
+
+export async function getStreamMessageRange(name, startSeq, endSeq, subjectFilter, max) {
+  const q = new URLSearchParams({
+    start: String(startSeq),
+    end: String(endSeq),
+    max: String(max),
+  });
+  if (subjectFilter) q.set("filter", subjectFilter);
+
+  const msgs = await get(`${streamPath(name)}/messages?${q}`);
+  return (msgs || []).map((m) => ({
+    seq: m.seq,
+    subject: m.subject,
+    data: decodePayload(m.data),
+    time: m.time,
+    headers: m.headers || null,
+  }));
+}
+
+export async function startStreamTail(name, subjectFilter, onMsg) {
+  await connectWs();
+  tailHandler = onMsg;
+  try {
+    return await post(`${streamPath(name)}/tail`, { filter: subjectFilter || "" });
+  } catch (e) {
+    tailHandler = null;
+    throw e;
+  }
+}
 
 export function stopStreamTail() {
   tailHandler = null;
+  del("/api/tail").catch(() => {});
 }
 
 export function isTailing() {

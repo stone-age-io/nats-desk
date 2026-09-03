@@ -11,7 +11,7 @@ export CGO_ENABLED = 0
 LDFLAGS := -s -w -X main.version=$(VERSION)
 GOFLAGS := -trimpath -ldflags "$(LDFLAGS)"
 
-.PHONY: all build ui build-all test test-coverage fmt lint deps clean install-tools dev run
+.PHONY: all build ui build-all test test-race test-coverage fmt lint deps clean install-tools dev run
 
 all: build
 
@@ -54,11 +54,21 @@ dev:
 run: build
 	./$(BINARY)$(shell go env GOEXE)
 
+## test: the default, and it runs anywhere
+##
+## Deliberately no -race: the race detector requires cgo, which contradicts the
+## global CGO_ENABLED=0 above and needs a C toolchain that a Windows dev box
+## typically does not have. `make test` failing to even build is worse than
+## running without the detector, so race is opt-in below.
 test:
-	go test -race -cover ./...
+	go test -cover ./...
+
+## test-race: needs cgo and a C compiler (gcc/clang) on PATH
+test-race:
+	CGO_ENABLED=1 go test -race -cover ./...
 
 test-coverage:
-	go test -race -coverprofile=coverage.out ./...
+	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "wrote coverage.html"
 

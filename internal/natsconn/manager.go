@@ -14,6 +14,7 @@ import (
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // ErrNotConnected is returned by every operation that needs a live
@@ -29,6 +30,17 @@ type Sink interface {
 	Message(subID uint64, subject string, data []byte, headers nats.Header)
 	Status(state string, err error)
 	Stats(rttMillis float64)
+	KvChange(key, operation string)
+	TailMessage(msg TailMsg)
+}
+
+// TailMsg is one message from a live stream tail.
+type TailMsg struct {
+	Seq     uint64      `json:"seq"`
+	Subject string      `json:"subject"`
+	Data    []byte      `json:"-"`
+	Time    time.Time   `json:"time"`
+	Headers nats.Header `json:"headers,omitempty"`
 }
 
 type subscription struct {
@@ -45,6 +57,13 @@ type Manager struct {
 	subs      map[uint64]*subscription
 	nextSubID uint64
 	stopStats chan struct{}
+
+	// JetStream state. One connection has at most one open KV bucket and one
+	// live stream tail, matching what the UI can show at once.
+	jsHandle  jetstream.JetStream
+	kv        jetstream.KeyValue
+	kvWatcher jetstream.KeyWatcher
+	tail      jetstream.ConsumeContext
 }
 
 func New(sink Sink) *Manager {
@@ -153,12 +172,17 @@ func friendlyConnectError(err error) error {
 }
 
 func (m *Manager) Disconnect() {
+	m.stopKvWatcher()
+	m.StopStreamTail()
+
 	m.mu.Lock()
 	nc := m.nc
 	stop := m.stopStats
 	m.nc = nil
 	m.stopStats = nil
 	m.subs = map[uint64]*subscription{}
+	m.jsHandle = nil
+	m.kv = nil
 	m.mu.Unlock()
 
 	if stop != nil {

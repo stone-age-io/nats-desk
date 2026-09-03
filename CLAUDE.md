@@ -44,8 +44,9 @@ make build-all VERSION=1.0.0
 # Frontend iteration with HMR: run this, then `npm run dev` in frontend/
 make dev
 
-# Tests with race detection and coverage
+# Tests. make test has no -race on purpose (see Testing below)
 make test
+make test-race       # needs cgo + a C compiler
 make test-coverage
 
 make fmt
@@ -131,6 +132,28 @@ pseudo-version. We do the same.
 **`serverdata.DoReqAsync` panics on a nil logger.** It calls `log.Debugf` with
 no nil check. Pass `api.NewDiscardLogger()`.
 
+**A KV watch must not start before its listener exists.** `WatchAll` replays
+every existing key the instant it opens, and that replay is the *only* thing
+that populates the key list. Opening the bucket and starting the watch were
+originally one endpoint, so the whole replay landed before the browser had
+registered its handler and the list came up empty. `POST /api/kv/open` and
+`POST /api/kv/watch` are separate for that reason - do not recombine them.
+
+**`IgnoreDeletes` would break the key list.** The UI removes rows on DEL and
+PURGE, so those events have to arrive.
+
+**Two jetstream String() methods lie about the wire format.**
+`KeyValueOp.String()` gives "KeyValueDeleteOp" where the KV-Operation header
+says "DEL" - the UI keys off the latter, so `kvOpName` maps them.
+`StorageType.String()` gives "File", but `StorageType.UnmarshalJSON` accepts
+only the lowercase `"file"`, so reporting the String() form produced a config
+the edit dialog could show and the server would then reject on save. Marshal
+the value itself and both directions agree.
+
+**KV keys can contain "/".** The routes use `{key...}` trailing wildcards, and
+the client encodes each slash-separated segment individually, so
+`config/db/host` keeps its structure while everything else is escaped.
+
 **`ui.js` takes headers as a plain object.** They used to arrive as a NATS
 `MsgHdrs`, which iterates as `[key, value]` pairs; `ui.js` was already
 inconsistent about this, using `Object.entries` for stream messages and bare
@@ -151,12 +174,23 @@ Test rig config lives in the scratchpad, not the repo: a single server with
 JetStream, `http_port: 8222`, an `APP` account and a `SYS` account with
 `system_account: SYS`, so all three monitoring sources are exercisable.
 
+## Testing
+
+`make test` runs without the race detector on purpose - `-race` needs cgo and a
+C compiler, which the global `CGO_ENABLED=0` and a typical Windows dev box do
+not provide. Use `make test-race` where a toolchain exists.
+
+Coverage is currently thin and concentrated on the logic that is easy to get
+silently wrong: the subject filter rules, the KV operation mapping, and the
+batching/drop accounting. The HTTP and NATS layers are covered by driving the
+real UI against a real server, not by unit tests.
+
 ## Status
 
 - **Phase 1 (done):** server, auth, connect/disconnect/status/info,
   publish/request, subscribe with the system-subject filter, message push.
-- **Phase 2:** KV and JetStream. `api.js` currently throws a clear
-  "not available yet" for these rather than failing silently.
+- **Phase 2 (done):** KV buckets, keys, history, live watch; JetStream streams,
+  consumers, message-range fetch and live tail.
 - **Phase 3:** NATS CLI contexts via `jsm.go/natscontext`.
 - **Phase 4:** monitoring - data connection, separate `$SYS` connection, and
   HTTP `:8222`, each independently configurable.

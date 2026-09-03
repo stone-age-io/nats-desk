@@ -42,6 +42,9 @@ func (a *API) Register(m Mounter) {
 	route("POST /api/request", a.request)
 	route("POST /api/sub", a.subscribe)
 	route("DELETE /api/sub/{id}", a.unsubscribe)
+
+	a.registerKV(route)
+	a.registerStreams(route)
 }
 
 // ============================================================================
