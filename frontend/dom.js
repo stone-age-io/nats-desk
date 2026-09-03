@@ -43,6 +43,7 @@ export const els = {
   monSysUrl: $("monSysUrl"),
   monSysUser: $("monSysUser"),
   monSysPass: $("monSysPass"),
+  monSysCreds: $("monSysCreds"),
   monSysHint: $("monSysHint"),
   btnMonSysConnect: $("btnMonSysConnect"),
   btnMonSysDisconnect: $("btnMonSysDisconnect"),

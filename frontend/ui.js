@@ -974,7 +974,7 @@ export function renderMonitorServers(rows, onSelect) {
     tr.dataset.id = r.id;
     if (stale) tr.classList.add("stale");
     tr.innerHTML =
-      `<td>${utils.escapeHtml(r.name)}</td>` +
+      `<td class="name" title="${utils.escapeHtml(r.name)}">${utils.escapeHtml(r.name)}</td>` +
       `<td>${utils.escapeHtml(r.cluster || "-")}</td>` +
       `<td class="num">${r.connections}</td>` +
       `<td class="num">${r.subscriptions}</td>` +

@@ -357,6 +357,11 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
   text-transform: uppercase; letter-spacing: 0.04em;
 }
 .mon-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* A server that was never given a name reports its ID instead - 56 characters
+   of it - which without a cap pushes every other column out of the pane. The
+   full value stays available as the cell's title. */
+.mon-table td.name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .mon-table tbody tr { cursor: pointer; }
 .mon-table tbody tr:hover { background: var(--border-soft); }
 .mon-table tbody tr.active { background: rgba(88,166,255,0.12); color: var(--accent); }

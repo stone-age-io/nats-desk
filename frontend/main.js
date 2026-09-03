@@ -804,10 +804,18 @@ async function handleMonitorRefresh() {
 
 async function handleMonSysConnect() {
   const ctx = els.monSysContext.value;
+
+  // A .creds file wins over user/password, which is the order the backend
+  // resolves them in and the same rule the main connection form follows. A
+  // system account is the likeliest place to need one: operator mode is
+  // exactly where a $SYS user exists at all.
+  //
+  // Read only on the manual branch - a context carries its own credentials.
   const body = ctx
     ? { context: ctx }
     : {
         url: els.monSysUrl.value.trim(),
+        credsText: els.monSysCreds.files.length ? await els.monSysCreds.files[0].text() : "",
         user: els.monSysUser.value.trim(),
         pass: els.monSysPass.value,
       };

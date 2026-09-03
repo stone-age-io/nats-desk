@@ -162,6 +162,13 @@ either. Anything it returns is readable by whoever can reach the port. Its TLS
 settings are its own in the UI, because the monitoring port routinely has a
 different certificate - often a private CA - from the client port.
 
+**The system-account panel takes a `.creds` file, and needs to.** Operator
+mode is exactly where a `$SYS` user exists at all, so JWT is the *likeliest*
+way to authenticate that connection, not an edge case. It reuses
+`natsconn.AuthOptions.Option` - which is why that method is exported - so the
+resolution order is identical to the main connection form: creds, then token,
+then user/password.
+
 **Only the monitoring URLs are remembered; the system-account credentials are
 not.** URLs are addresses. Credentials belong in the NATS CLI context that
 already holds them, which is why the system-account panel offers the context
@@ -269,6 +276,19 @@ ports so both run at once:
   operator mode.
 - a three node cluster on 4322-4324 (monitoring 8322-8324, routes 6322-6324),
   same accounts, for the fan-out and the live grid.
+- an **operator-mode** server on 4422 (monitoring 8422) for `.creds` auth,
+  which plain accounts/users config cannot express. `nsc` is not installed on
+  this machine and is not needed: `jwt/v2` and `nkeys` are already dependencies,
+  and about a hundred lines generates an operator, a SYS and an APP account
+  (APP with `Limits.JetStreamLimits.{Disk,Memory}Storage = -1`), a user per
+  account written with `jwt.FormatUserConfig`, and a config carrying
+  `operator:`, `system_account:`, `resolver: MEMORY` and `resolver_preload`.
+  Generate it into the scratchpad; it must not ship in `cmd/`.
+
+Set `server_name` in any test rig. Without it NATS reports the 56-character
+server ID as the name, which is worth seeing once - it is what caught the grid's
+name column pushing every other column out of the pane - but is unreadable
+otherwise.
 
 **nats-server on Windows accepts `--signal` only when installed as a service**,
 so `ldm` and `stop` return "Access is denied" against a console-run server and a

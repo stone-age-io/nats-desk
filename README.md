@@ -114,9 +114,10 @@ interchangeable:
 - **Your own account**, over the connection the app already has. Nothing to
   configure: the server imports these endpoints into every account.
 - **The `$SYS` account**, as a second connection - point it at a NATS CLI
-  context and nothing is stored. The only source that reaches a whole cluster in
-  one request and *pushes* events, so the grid updates with no polling and a
-  client connecting shows up as it happens.
+  context and nothing is stored, or give it a URL with a `.creds` file or a
+  username and password. The only source that reaches a whole cluster in one
+  request and *pushes* events, so the grid updates with no polling and a client
+  connecting shows up as it happens.
 - **The `:8222` endpoints**, which need no NATS credentials at all - the
   fallback when no system user exists. They also have no authentication of their
   own, which the UI says plainly.
