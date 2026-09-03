@@ -124,6 +124,9 @@ export function renderHistoryDatalist(elementId, items) {
 /**
  * Re-render a select from a list of named items, preserving the
  * placeholder option and reselecting the previous value when possible.
+ *
+ * An item may carry a `label` to show instead of its name; the value stays
+ * the name either way, so callers keep matching on that.
  */
 export function renderNamedOptions(selectEl, items, placeholder) {
   const prev = selectEl.value;
@@ -137,7 +140,7 @@ export function renderNamedOptions(selectEl, items, placeholder) {
   items.forEach((item) => {
     const opt = document.createElement("option");
     opt.value = item.name;
-    opt.textContent = item.name;
+    opt.textContent = item.label || item.name;
     selectEl.append(opt);
   });
 

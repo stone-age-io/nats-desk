@@ -45,6 +45,7 @@ func (a *API) Register(m Mounter) {
 
 	a.registerKV(route)
 	a.registerStreams(route)
+	a.registerContexts(route)
 }
 
 // ============================================================================
@@ -84,6 +85,7 @@ func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 
 func (a *API) connect(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Context   string `json:"context"`
 		URL       string `json:"url"`
 		CredsText string `json:"credsText"`
 		User      string `json:"user"`
@@ -93,6 +95,14 @@ func (a *API) connect(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+
+	// A context carries its own URL and credentials, so it is the whole
+	// request - the form fields do not apply on top of it.
+	if req.Context != "" {
+		a.connectContext(w, req.Context)
+		return
+	}
+
 	if req.URL == "" {
 		fail(w, errors.New("a server URL is required"))
 		return

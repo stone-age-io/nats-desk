@@ -77,7 +77,7 @@ nats-desk/
 │   ├── ws/                     # push channel: batching, drop accounting
 │   ├── natsconn/               # the NATS connection, pub/sub, subject rules
 │   ├── browse/                 # open a URL in the default browser
-│   ├── contexts/               # (phase 3) jsm.go/natscontext
+│   ├── contexts/               # the nats CLI's own context store
 │   ├── monitor/                # (phase 4) three monitoring sources
 │   └── store/                  # (phase 3) profiles on disk
 └── Makefile
@@ -115,6 +115,34 @@ silent gap in a message log is a lie. See `internal/ws/hub.go`.
 on arrival and could only ever show a hex stub for binary. Now the bytes
 survive end to end and only the *display* falls back to hex.
 
+**A context is edited as its own file, not through a form.** The settings
+struct has two dozen fields and grows with the CLI; a form would silently drop
+whatever it had not been taught about, so the dialog round-trips the file's raw
+JSON and `internal/contexts.Save` hands it back through natscontext for
+validation. Two consequences to keep: `Get` reads the **raw backend payload**
+rather than a loaded Context, because a load has already expanded `~` and
+`$VARS` and saving that back would rewrite a portable `~/x.creds` into an
+absolute path belonging to this machine; and `Save` goes through
+`NewFromBytesRaw`, the library's own "faithful roundtrip" entry point.
+
+**`With*` options cannot clear a field.** Every one of them is
+`if v != "" { s.X = v }`, so a load-then-apply-options editor can set a
+password but never remove one. That is the other reason the editor is
+JSON-shaped.
+
+**Selecting a context to connect with is not the same as selecting it for the
+CLI.** `context.txt` is read by every NATS tool on the machine, so changing it
+is its own endpoint and its own button. Picking one in the popover only affects
+this connection.
+
+**`DeleteContext` refuses to delete the active context** unless it is the only
+one. That refusal is the library's, and the UI shows it verbatim rather than
+pre-empting it - the message names the problem exactly.
+
+**Contexts are listed from raw payloads, never loaded.** `Registry.Load`
+eagerly resolves the deprecated `nsc` field, which shells out to the `nsc`
+binary. Listing five contexts must not run five subprocesses.
+
 **`jsm.go`, not `orbit.go`, for contexts.** `orbit.go/natscontext` exports one
 function - `Connect` - and cannot enumerate contexts, which a GUI picker needs.
 It also parses `user_jwt` and never uses it, resolves `nsc` lookups and discards
@@ -123,7 +151,8 @@ the result, and hard-errors on Windows cert-store contexts.
 `jsm.go/serverdata` then comes free in the same module for `$SYS` scatter-gather.
 Measured cost: `nats.go` alone links to 6.3MB stripped; adding `natscontext`
 takes it to 12MB; adding `serverdata` and the `nats-server` response types costs
-only **1MB more**.
+only **1MB more**. Measured again when phase 3 landed it for real: the binary
+went from 12.1MB to 14.6MB, so `natscontext` costs about **2.5MB**.
 
 **`serverdata` is not in a tagged jsm.go release.** v0.4.1 does not contain the
 package; it only exists on later commits, which is why `natscli` pins a
@@ -172,7 +201,15 @@ useless as a responsiveness probe there. Use `setTimeout` lag instead.
 
 Test rig config lives in the scratchpad, not the repo: a single server with
 JetStream, `http_port: 8222`, an `APP` account and a `SYS` account with
-`system_account: SYS`, so all three monitoring sources are exercisable.
+`system_account: SYS`, so all three monitoring sources are exercisable. `APP`
+also carries an **nkey user**, which is what makes "the backend reads a
+credential file the browser could never touch" testable locally - a `.creds`
+file would need the server in operator mode.
+
+Context tests must call `t.Setenv("XDG_CONFIG_HOME", t.TempDir())` first.
+natscontext reads that on every call and caches nothing, so it is enough to
+keep a test off the developer's real `nats` contexts - and running them
+against those would be destructive.
 
 ## Testing
 
@@ -181,8 +218,8 @@ C compiler, which the global `CGO_ENABLED=0` and a typical Windows dev box do
 not provide. Use `make test-race` where a toolchain exists.
 
 Coverage is currently thin and concentrated on the logic that is easy to get
-silently wrong: the subject filter rules, the KV operation mapping, and the
-batching/drop accounting. The HTTP and NATS layers are covered by driving the
+silently wrong: the subject filter rules, the KV operation mapping, the
+batching/drop accounting, and the context editor's round-trip fidelity. The HTTP and NATS layers are covered by driving the
 real UI against a real server, not by unit tests.
 
 ## Status
@@ -191,6 +228,7 @@ real UI against a real server, not by unit tests.
   publish/request, subscribe with the system-subject filter, message push.
 - **Phase 2 (done):** KV buckets, keys, history, live watch; JetStream streams,
   consumers, message-range fetch and live tail.
-- **Phase 3:** NATS CLI contexts via `jsm.go/natscontext`.
+- **Phase 3 (done):** NATS CLI contexts - list, create, edit, delete, set the
+  CLI default, and connect through one.
 - **Phase 4:** monitoring - data connection, separate `$SYS` connection, and
   HTTP `:8222`, each independently configurable.

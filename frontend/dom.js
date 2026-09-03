@@ -33,6 +33,13 @@ export const els = {
   btnProfileSave: $("btnProfileSave"),
   btnProfileDelete: $("btnProfileDelete"),
 
+  contextSelect: $("contextSelect"),
+  contextHint: $("contextHint"),
+  btnContextNew: $("btnContextNew"),
+  btnContextEdit: $("btnContextEdit"),
+  btnContextDelete: $("btnContextDelete"),
+  btnContextDefault: $("btnContextDefault"),
+
   // --- Subscriptions --------------------------------------------------------
   subSubject: $("subSubject"),
   btnSub: $("btnSub"),

@@ -78,11 +78,33 @@ type AuthOptions struct {
 	Token     string
 }
 
-// Connect replaces any existing connection.
+// Connect replaces any existing connection, using credentials the UI collected.
 func (m *Manager) Connect(url string, auth AuthOptions) error {
+	authOpt, err := auth.option()
+	if err != nil {
+		return err
+	}
+
+	var opts []nats.Option
+	if authOpt != nil {
+		opts = append(opts, authOpt)
+	}
+	return m.ConnectWith(url, opts)
+}
+
+// ConnectWith replaces any existing connection, using options assembled
+// elsewhere - a NATS CLI context builds its own, covering creds files, nkeys
+// and client certificates that only a process on this machine can read.
+//
+// The manager's own options go last, because nats.go applies options in order
+// and a context must not be able to displace the status handlers the UI
+// depends on.
+func (m *Manager) ConnectWith(url string, opts []nats.Option) error {
 	m.Disconnect()
 
-	opts := []nats.Option{
+	all := make([]nats.Option, 0, len(opts)+5)
+	all = append(all, opts...)
+	all = append(all,
 		nats.Name("nats-desk"),
 		nats.MaxReconnects(-1),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
@@ -94,17 +116,9 @@ func (m *Manager) Connect(url string, auth AuthOptions) error {
 		nats.ClosedHandler(func(nc *nats.Conn) {
 			m.sink.Status("disconnected", nc.LastError())
 		}),
-	}
+	)
 
-	authOpt, err := auth.option()
-	if err != nil {
-		return err
-	}
-	if authOpt != nil {
-		opts = append(opts, authOpt)
-	}
-
-	nc, err := nats.Connect(url, opts...)
+	nc, err := nats.Connect(url, all...)
 	if err != nil {
 		return friendlyConnectError(err)
 	}

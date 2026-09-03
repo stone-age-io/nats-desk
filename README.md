@@ -89,6 +89,17 @@ saved settings stay on the old one. Pick a port once.
 - **History:** every revision of a key, newest first
 - **Live watch:** the key list updates as other clients add and remove keys
 
+### NATS CLI contexts
+- **The same files `nats context` uses** - one created here works from the
+  command line, and one created there shows up here
+- **Connect through a context**, so a `.creds` file, an nkey seed or a client
+  certificate is read from disk by the backend. This is the part a browser
+  cannot do at all.
+- **Edit the file's own JSON**, so a field this app has never heard of survives
+  being edited here
+- **Set the CLI default** explicitly - picking a context to connect with does
+  not quietly change what every other NATS tool on the machine uses
+
 ### JetStream streams
 - **Streams:** list, create, edit and delete; purge messages
 - **Consumers:** full config view and edit, with pending/waiting/ack counts
@@ -97,9 +108,8 @@ saved settings stay on the old one. Pick a port once.
 - **Live tail:** follow new messages as they arrive
 
 ### Coming
-`nats` CLI context import, and server monitoring via both `:8222` and the
-`$SYS` account. The UI tells you plainly when you reach something that isn't
-wired up yet.
+Server monitoring via both `:8222` and the `$SYS` account. The UI tells you
+plainly when you reach something that isn't wired up yet.
 
 ## Security
 

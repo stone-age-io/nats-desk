@@ -66,6 +66,20 @@
       <option value="">-- No Profile --</option>
     </select>
 
+    <div class="field-group">
+      <label for="contextSelect">NATS CLI context</label>
+      <div class="picker-row">
+        <select id="contextSelect" title="Connect using a context from the nats CLI">
+          <option value="">-- Manual settings --</option>
+        </select>
+        <button id="btnContextNew" class="sm-btn" title="Create a context">+</button>
+        <button id="btnContextEdit" class="sm-btn" title="Edit this context">&#9998;</button>
+        <button id="btnContextDelete" class="sm-btn danger" title="Delete this context">&#10005;</button>
+      </div>
+      <div id="contextHint" class="creds-hint" hidden></div>
+      <button id="btnContextDefault" class="sm-btn block" hidden>Make this the nats CLI default</button>
+    </div>
+
     <label for="serverUrl">Server URL</label>
     <input type="text" id="serverUrl" list="urlHistory" value="nats://localhost:4222"
            placeholder="nats://localhost:4222" autocorrect="off" autocapitalize="off" spellcheck="false" />

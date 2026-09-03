@@ -56,6 +56,15 @@ const appState = {
   // Creds file text loaded from the selected profile (null if none)
   profileCredsText: null,
 
+  // Every NATS CLI context the backend can see, as listed
+  contexts: [],
+
+  // Name of the context the connection form is using, or null for manual
+  contextName: null,
+
+  // The URL typed by hand, parked while a context owns the field
+  manualUrl: "",
+
   // URL we are currently connected to - used to key saved subscriptions
   connectedUrl: null,
 
@@ -109,6 +118,7 @@ function initializeApp() {
   refreshHistoryUi();
   refreshProfileUi();
   refreshTemplateUi();
+  refreshContextUi();
 
   // Restore log direction before anything can render into the log
   ui.setNewestFirst(storage.getLogNewestFirst(), { reflow: false });
@@ -290,16 +300,26 @@ async function handleConnect() {
     return;
   }
 
+  const contextName = appState.contextName;
   const url = els.url.value.trim();
   if (!url) {
     ui.showToast("Please enter a server URL", "error");
     return;
   }
 
+  // What the connection pill and the saved-subscription list are keyed on. A
+  // context's URL is filled into the field when it is picked, so this starts
+  // correct either way; the backend's answer replaces it once it arrives.
+  let activeUrl = url;
+
   try {
-    storage.saveUrl(url);
-    storage.addUrlToHistory(url);
-    refreshHistoryUi();
+    // Typed URLs go in the history. A context's does not: it was not typed,
+    // and the context picker already lists it.
+    if (!contextName) {
+      storage.saveUrl(url);
+      storage.addUrlToHistory(url);
+      refreshHistoryUi();
+    }
 
     els.statusText.textContent = "Connecting…";
     els.btnConnect.disabled = true;
@@ -313,17 +333,18 @@ async function handleConnect() {
     }
 
     const authOptions = {
+      context: contextName,
       credsText,
       user: els.authUser.value.trim(),
       pass: els.authPass.value.trim(),
       token: els.authToken.value.trim(),
     };
 
-    await nats.connectToNats(
+    const res = await nats.connectToNats(
       url,
       authOptions,
       (status, err) => {
-        ui.setConnectionState(status, url);
+        ui.setConnectionState(status, activeUrl);
         if (status === "disconnected") {
           // Connection lost - clear per-connection state so the UI
           // doesn't act on stale handles after a manual reconnect
@@ -340,12 +361,16 @@ async function handleConnect() {
       (stats) => ui.setRtt(stats.rtt)
     );
 
-    appState.connectedUrl = url;
-    ui.setConnectionState("connected", url);
-    ui.showToast("Connected to NATS", "success");
+    activeUrl = res.url || url;
+    appState.connectedUrl = activeUrl;
+    ui.setConnectionState("connected", activeUrl);
+    ui.showToast(
+      contextName ? `Connected using context '${contextName}'` : "Connected to NATS",
+      "success"
+    );
     closeConnPopover();
 
-    await restoreSubscriptions(url);
+    await restoreSubscriptions(activeUrl);
 
     const tab = ui.getActiveTab();
     if (tab === "kv") loadKvBucketsWrapper();
@@ -385,6 +410,13 @@ function handleProfileChange() {
   ui.setActiveProfile(els.profileSelect.value);
 
   if (!profile) return;
+
+  // A profile and a context both own the URL and the credentials, so picking
+  // one drops the other rather than leaving it unclear which is in effect.
+  if (appState.contextName) {
+    els.contextSelect.value = "";
+    applyContextSelection();
+  }
 
   els.url.value = profile.url || "";
   els.authUser.value = profile.user || "";
@@ -461,6 +493,195 @@ async function handleProfileDelete() {
 els.profileSelect.addEventListener("change", handleProfileChange);
 els.btnProfileSave.addEventListener("click", handleProfileSave);
 els.btnProfileDelete.addEventListener("click", handleProfileDelete);
+
+// ============================================================================
+// NATS CLI CONTEXT HANDLERS
+// ============================================================================
+// Contexts are the `nats` CLI's own files on this machine, and we read and
+// write exactly those - a context created here works from the command line,
+// and one created there shows up here.
+//
+// Picking a context to connect with does NOT change which context the CLI
+// defaults to. That is shared state every NATS tool on the machine reads, so
+// changing it takes its own deliberate button.
+
+// A new context starts from the fields anyone actually fills in. Everything
+// omitted takes its zero value, and the saved file carries the full set - the
+// same shape `nats context add` writes.
+const NEW_CONTEXT_TEMPLATE = {
+  description: "",
+  url: "nats://localhost:4222",
+  user: "",
+  password: "",
+  token: "",
+  creds: "",
+};
+
+/**
+ * Reload the context list and re-apply the picker.
+ *
+ * @param {string} select - context to leave selected; "" for manual settings.
+ *                          A name that no longer exists falls back to manual.
+ */
+async function refreshContextUi(select = appState.contextName) {
+  try {
+    appState.contexts = await nats.getContexts();
+  } catch (err) {
+    // We are served by the backend, so it is up; this means the context
+    // directory could not be read. Stay on manual settings and say so.
+    console.error("Failed to list NATS contexts:", err);
+    appState.contexts = [];
+    ui.showToast(`Could not read NATS contexts: ${err.message}`, "error");
+  }
+
+  const items = appState.contexts.map((c) => ({
+    name: c.name,
+    label: c.selected ? `${c.name}  (CLI default)` : c.name,
+  }));
+  ui.renderNamedOptions(els.contextSelect, items, "-- Manual settings --");
+
+  els.contextSelect.value = appState.contexts.some((c) => c.name === select) ? select : "";
+  applyContextSelection();
+}
+
+/** The context currently picked in the popover, or null in manual mode. */
+function currentContext() {
+  return appState.contexts.find((c) => c.name === els.contextSelect.value) || null;
+}
+
+/**
+ * Make the form reflect the picker.
+ *
+ * A context owns the URL and the credentials, so the fields it supersedes show
+ * its values and go disabled - disabled rather than hidden, because "this is
+ * what you are about to connect with" is the useful thing to see.
+ */
+function applyContextSelection() {
+  const ctx = currentContext();
+  const wasManual = appState.contextName === null;
+  appState.contextName = ctx ? ctx.name : null;
+
+  if (ctx) {
+    if (wasManual) appState.manualUrl = els.url.value;
+    els.url.value = ctx.url;
+    els.profileSelect.value = "";
+    ui.setActiveProfile("");
+    appState.profileCredsText = null;
+    els.credsHint.hidden = true;
+  } else if (!wasManual) {
+    els.url.value = appState.manualUrl;
+  }
+
+  for (const el of [els.url, els.creds, els.authUser, els.authPass, els.authToken, els.saveCredsChk]) {
+    el.disabled = !!ctx;
+  }
+  els.btnProfileSave.disabled = !!ctx;
+  els.btnContextEdit.disabled = !ctx;
+  els.btnContextDelete.disabled = !ctx;
+
+  els.contextHint.hidden = !ctx;
+  els.btnContextDefault.hidden = !ctx || ctx.selected;
+
+  if (ctx) {
+    const bits = [ctx.auth, ctx.url];
+    if (ctx.selected) bits.push("already the nats CLI default");
+    els.contextHint.textContent = bits.join(" · ");
+    els.contextHint.title = ctx.description || "";
+  }
+}
+
+async function handleContextNew() {
+  const name = await dlg.promptDialog({
+    title: "New NATS context",
+    label: "Context name",
+    placeholder: "dev / staging / prod",
+  });
+  if (!name) return;
+
+  dlg.jsonDialog({
+    title: `New context '${name}'`,
+    hint: "Written where the nats CLI keeps its contexts, so the CLI sees it too.",
+    value: NEW_CONTEXT_TEMPLATE,
+    saveLabel: "Create",
+    onSave: async (config) => {
+      await nats.saveContext(name, config);
+      await refreshContextUi(name);
+      ui.showToast(`Context '${name}' created`, "success");
+    },
+  });
+}
+
+async function handleContextEdit() {
+  const ctx = currentContext();
+  if (!ctx) {
+    ui.showToast("Select a context first", "info");
+    return;
+  }
+
+  let detail;
+  try {
+    detail = await nats.getContext(ctx.name);
+  } catch (err) {
+    ui.showToast(err.message, "error");
+    return;
+  }
+
+  // The file's own JSON, unexpanded - so a portable "~/x.creds" stays portable
+  // instead of being rewritten to an absolute path belonging to this machine.
+  dlg.jsonDialog({
+    title: `Edit context '${ctx.name}'`,
+    hint: detail.path,
+    value: detail.config,
+    onSave: async (config) => {
+      await nats.saveContext(ctx.name, config);
+      await refreshContextUi(ctx.name);
+      ui.showToast(`Context '${ctx.name}' saved`, "success");
+    },
+  });
+}
+
+async function handleContextDelete() {
+  const ctx = currentContext();
+  if (!ctx) {
+    ui.showToast("Select a context first", "info");
+    return;
+  }
+
+  const ok = await dlg.confirmDialog({
+    title: "Delete context",
+    message: `Delete the context '${ctx.name}'? This removes the file the nats CLI reads. Any creds file or certificate it points at is left alone.`,
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    await nats.deleteContext(ctx.name);
+    await refreshContextUi("");
+    ui.showToast(`Context '${ctx.name}' deleted`, "info");
+  } catch (err) {
+    ui.showToast(err.message, "error");
+  }
+}
+
+async function handleContextDefault() {
+  const ctx = currentContext();
+  if (!ctx) return;
+
+  try {
+    await nats.selectContext(ctx.name);
+    await refreshContextUi(ctx.name);
+    ui.showToast(`'${ctx.name}' is now the default context for the nats CLI`, "success");
+  } catch (err) {
+    ui.showToast(err.message, "error");
+  }
+}
+
+els.contextSelect.addEventListener("change", applyContextSelection);
+els.btnContextNew.addEventListener("click", handleContextNew);
+els.btnContextEdit.addEventListener("click", handleContextEdit);
+els.btnContextDelete.addEventListener("click", handleContextDelete);
+els.btnContextDefault.addEventListener("click", handleContextDefault);
 
 // Picking a real .creds file overrides profile creds - hide the hint
 els.creds.addEventListener("change", () => {

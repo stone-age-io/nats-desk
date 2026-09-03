@@ -193,6 +193,17 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
 }
 .creds-hint { font-size: 0.72rem; color: var(--accent); margin-top: var(--s1); }
 
+/* A select with its own small action buttons. The select takes the slack;
+   min-width:0 is what stops a long context name from pushing them off. */
+.picker-row { display: flex; gap: var(--s2); align-items: center; }
+.picker-row select { flex: 1; min-width: 0; margin: 0; }
+
+/* Fields a NATS CLI context has taken over. Still readable - the context's own
+   values are shown in them - but not editable, because editing them would do
+   nothing. */
+.conn-popover input:disabled,
+.conn-popover select:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .check-row {
   display: flex; align-items: flex-start; gap: var(--s2);
   margin: var(--s3) 0; cursor: pointer;

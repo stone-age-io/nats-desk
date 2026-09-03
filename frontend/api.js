@@ -94,6 +94,7 @@ async function call(method, path, body) {
 
 const get = (p) => call("GET", p);
 const post = (p, b) => call("POST", p, b);
+const put = (p, b) => call("PUT", p, b);
 const del = (p) => call("DELETE", p);
 
 // ============================================================================
@@ -199,18 +200,30 @@ function dispatch(frame) {
 // CONNECTION
 // ============================================================================
 
+/**
+ * Connect. Pass `authOptions.context` to connect through a NATS CLI context
+ * instead, in which case nothing else is sent: the context carries its own URL
+ * and its own credentials, and the backend resolves the creds file, nkey or
+ * client certificate that this tab could never read itself.
+ *
+ * The response carries `url` - what the backend actually dialled - which is
+ * the only way the UI learns a context's server address.
+ */
 export async function connectToNats(url, authOptions, onStatusChange, onStats) {
   statusHandler = onStatusChange;
   statsHandler = onStats;
 
   await connectWs();
-  const res = await post("/api/connect", {
-    url,
-    credsText: authOptions.credsText || "",
-    user: authOptions.user || "",
-    pass: authOptions.pass || "",
-    token: authOptions.token || "",
-  });
+  const body = authOptions.context
+    ? { context: authOptions.context }
+    : {
+        url,
+        credsText: authOptions.credsText || "",
+        user: authOptions.user || "",
+        pass: authOptions.pass || "",
+        token: authOptions.token || "",
+      };
+  const res = await post("/api/connect", body);
   connected = true;
   serverInfo = res.info || null;
   return res;
@@ -508,4 +521,34 @@ export function stopStreamTail() {
 
 export function isTailing() {
   return tailHandler !== null;
+}
+
+// ============================================================================
+// NATS CLI CONTEXTS
+// ============================================================================
+// The same files `nats context` reads and writes, on this machine. Names go
+// through encodeURIComponent because a context name is only barred from
+// containing "/", "\\" and ".." - spaces and wildcards are legal and in the
+// wild.
+
+export async function getContexts() {
+  return get("/api/contexts");
+}
+
+/** The context file's own JSON, verbatim, plus where it lives on disk. */
+export async function getContext(name) {
+  return get(`/api/contexts/${encodeURIComponent(name)}`);
+}
+
+export async function saveContext(name, config) {
+  return put(`/api/contexts/${encodeURIComponent(name)}`, config);
+}
+
+export async function deleteContext(name) {
+  return del(`/api/contexts/${encodeURIComponent(name)}`);
+}
+
+/** Make this the context every other NATS tool on the machine defaults to. */
+export async function selectContext(name) {
+  return post(`/api/contexts/${encodeURIComponent(name)}/select`);
 }
