@@ -49,6 +49,7 @@ func (a *API) Register(m Mounter) {
 	a.registerStreams(route)
 	a.registerContexts(route)
 	a.registerMonitor(route)
+	a.registerDesktop(route)
 }
 
 // ============================================================================

@@ -41,6 +41,11 @@ type Options struct {
 	// IdleTimeout is how long to wait after the last WebSocket client
 	// disconnects before shutting down. Zero disables idle shutdown.
 	IdleTimeout time.Duration
+
+	// TokenPath is where the session token is stored, so a browser stays
+	// authenticated across restarts. Empty means a fresh token per process,
+	// which is what -dev and an unresolvable config directory get.
+	TokenPath string
 }
 
 type Server struct {
@@ -86,7 +91,7 @@ func New(opts Options) (*Server, error) {
 
 	s := &Server{
 		opts:  opts,
-		token: newToken(),
+		token: resolveToken(opts.TokenPath, opts.Logger),
 		dev:   opts.Dev,
 		log:   opts.Logger,
 		mux:   http.NewServeMux(),

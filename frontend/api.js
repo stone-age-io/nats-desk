@@ -622,3 +622,18 @@ export async function getMonitorEndpoint(name) {
 export async function getMonitorHttpEndpoint(name) {
   return get(`/api/monitor/http/${encodeURIComponent(name)}`);
 }
+
+// ============================================================================
+// DESKTOP
+// ============================================================================
+// The local process itself: what version it is, where it lives, and whether
+// it starts at sign-in. The only endpoints here that have nothing to do with
+// NATS, and the only ones that still answer usefully with no server anywhere.
+
+export async function getDesktop() {
+  return get("/api/desktop");
+}
+
+export async function setAutostart(enabled) {
+  return put("/api/desktop/autostart", { enabled });
+}

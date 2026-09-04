@@ -5,7 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NATS Client</title>
   <link rel="stylesheet" href="./style.css" />
-  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <!--
+    The PNGs, not logo.svg, and that is the whole point of them. A Chromium
+    --app= window takes its taskbar icon from the *favicon*, so pointing this
+    at the bare mark put an edge-to-edge hollow circle on the taskbar next to
+    properly padded icons. icon-192/512.png are the launcher treatment - white
+    behind the knockout, padding around the disc - and they are what every
+    surface outside the app's own chrome should use.
+
+    logo.svg stays in public/ as the vector source. It is deliberately not
+    referenced here: transparent interior and no padding is right *inside* the
+    UI, on a surface we control, and wrong everywhere else.
+  -->
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="manifest" href="/manifest.json"/>
 </head>
@@ -47,7 +60,44 @@
     </button>
 
     <button id="btnInfo" class="sm-btn" title="Server information" data-requires-conn>Server info</button>
+
+    <button id="btnSettings" class="sm-btn icon-btn" title="App settings"
+            popovertarget="settingsPopover" aria-haspopup="dialog">&#9881;</button>
   </header>
+
+  <!-- ==================================================================== -->
+  <!-- APP SETTINGS POPOVER                                                 -->
+  <!-- ==================================================================== -->
+  <!--
+    Settings for the local process, not for NATS - which is why this is its
+    own popover rather than another section of the connection one. Nothing in
+    here needs a NATS server to exist.
+  -->
+  <div id="settingsPopover" popover class="conn-popover" role="dialog" aria-label="App settings">
+    <div class="pane-head">
+      <h3>nats-desk</h3>
+      <span id="setVersion" class="muted-xs"></span>
+    </div>
+
+    <label class="check-row" id="setAutostartRow">
+      <input type="checkbox" id="setAutostart" />
+      <span>
+        Start nats-desk when I sign in
+        <span class="muted-xs block-hint">
+          Keeps the local process running, so the installed app opens straight
+          into a working window instead of a connection error.
+        </span>
+      </span>
+    </label>
+
+    <div id="setAutostartHint" class="creds-hint" hidden></div>
+
+    <div class="field-group">
+      <label>Paths</label>
+      <div class="path-row"><span>Program</span><code id="setExe">-</code></div>
+      <div class="path-row" id="setLogRow" hidden><span>Log</span><code id="setLog">-</code></div>
+    </div>
+  </div>
 
   <!-- ==================================================================== -->
   <!-- CONNECTION POPOVER                                                   -->

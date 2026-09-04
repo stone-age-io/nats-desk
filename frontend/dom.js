@@ -20,6 +20,17 @@ export const els = {
   rttLabel: $("rttLabel"),
   btnInfo: $("btnInfo"),
 
+  // --- App settings (app bar + popover) -------------------------------------
+  btnSettings: $("btnSettings"),
+  settingsPopover: $("settingsPopover"),
+  setVersion: $("setVersion"),
+  setAutostart: $("setAutostart"),
+  setAutostartRow: $("setAutostartRow"),
+  setAutostartHint: $("setAutostartHint"),
+  setExe: $("setExe"),
+  setLog: $("setLog"),
+  setLogRow: $("setLogRow"),
+
   url: $("serverUrl"),
   creds: $("credsFile"),
   authUser: $("authUser"),

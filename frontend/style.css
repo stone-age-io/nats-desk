@@ -211,6 +211,21 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
 }
 .check-row input { width: auto; margin: 2px 0 0 0; }
 
+/* A checkbox whose label needs a sentence under it rather than beside it */
+.block-hint { display: block; margin-top: var(--s1); line-height: 1.45; }
+
+/* Absolute paths are long and not worth wrapping mid-segment, so they get
+   their own line and scroll rather than pushing the popover wider. */
+.path-row {
+  display: flex; gap: var(--s2); align-items: baseline;
+  margin-top: var(--s2); font-size: 0.7rem;
+}
+.path-row > span { color: var(--muted-dim); flex-shrink: 0; width: 52px; }
+.path-row > code {
+  font-family: var(--mono); color: var(--muted);
+  overflow-x: auto; white-space: nowrap; min-width: 0;
+}
+
 /* --------------------------------------------------------------------------
    TABS
    -------------------------------------------------------------------------- */

@@ -75,6 +75,11 @@ const appState = {
   monitorStatus: null,
   monitorServers: [],
   monitorServer: null,
+
+  // Whether this platform can start the app at sign-in. Remembered because
+  // the toggle is re-enabled after every write and must not become usable on
+  // a platform that cannot honour it.
+  autostartSupported: false,
 };
 
 // Native popover support - Chrome 114+, Safari 17+, Firefox 125+.
@@ -116,7 +121,10 @@ function initializeApp() {
   setupSubscriptionEventDelegation();
   setupConsumerEventDelegation();
   setupHeaderEditor();
-  setupConnPopover();
+  setupFallbackPopover(els.btnConnStatus, els.connPopover);
+  setupFallbackPopover(els.btnSettings, els.settingsPopover);
+  setupSettings();
+  registerServiceWorker();
   initPaneSplitters();
   setupDropReporting();
 
@@ -254,30 +262,114 @@ function handleUrlParameters() {
 initializeApp();
 
 // ============================================================================
-// CONNECTION POPOVER
+// POPOVERS
 // ============================================================================
 
-function setupConnPopover() {
+/** Open/close a popover on a browser too old for the popover API. */
+function setupFallbackPopover(btn, pop) {
   if (SUPPORTS_POPOVER) return; // popovertarget in the markup does the work
 
-  els.btnConnStatus.addEventListener("click", () => {
-    els.connPopover.classList.toggle("fallback-open");
-  });
+  btn.addEventListener("click", () => pop.classList.toggle("fallback-open"));
   document.addEventListener("click", (e) => {
-    if (!els.connPopover.contains(e.target) && !els.btnConnStatus.contains(e.target)) {
-      els.connPopover.classList.remove("fallback-open");
+    if (!pop.contains(e.target) && !btn.contains(e.target)) {
+      pop.classList.remove("fallback-open");
     }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") els.connPopover.classList.remove("fallback-open");
+    if (e.key === "Escape") pop.classList.remove("fallback-open");
   });
 }
 
-function closeConnPopover() {
+function closePopover(pop) {
   if (SUPPORTS_POPOVER) {
-    try { els.connPopover.hidePopover(); } catch { /* already closed */ }
+    try { pop.hidePopover(); } catch { /* already closed */ }
   } else {
-    els.connPopover.classList.remove("fallback-open");
+    pop.classList.remove("fallback-open");
+  }
+}
+
+const closeConnPopover = () => closePopover(els.connPopover);
+
+// ============================================================================
+// APP SETTINGS
+// ============================================================================
+
+/**
+ * Register the service worker.
+ *
+ * One job: the offline page. When this window is an installed app and the
+ * backend is not running, a navigation lands on the browser's own connection
+ * error, which has nothing in it anyone can press - see public/sw.js.
+ *
+ * Unawaited on purpose. Nothing in the app depends on it, and a browser that
+ * declines simply keeps behaving the way it did before.
+ */
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("/sw.js").catch((err) => {
+    console.warn("service worker registration failed:", err);
+  });
+}
+
+function setupSettings() {
+  els.setAutostart.addEventListener("change", handleAutostartToggle);
+  loadDesktopSettings();
+}
+
+async function loadDesktopSettings() {
+  let info;
+  try {
+    info = await nats.getDesktop();
+  } catch (err) {
+    // Deliberately not a toast. This runs on every load, and a panel nobody
+    // has opened yet is not worth interrupting anyone over; the message is
+    // there when they do open it.
+    setAutostartHint(err.message);
+    return;
+  }
+
+  appState.autostartSupported = !!info.autostartSupported;
+
+  els.setVersion.textContent = info.version || "";
+  els.setExe.textContent = info.executable || "unknown";
+  els.setExe.title = info.executable || "";
+
+  // No log path means the log is going to a terminal, where whoever started
+  // the process can already read it.
+  els.setLogRow.hidden = !info.logPath;
+  els.setLog.textContent = info.logPath || "";
+  els.setLog.title = info.logPath || "";
+
+  els.setAutostart.checked = !!info.autostart;
+  els.setAutostart.disabled = !appState.autostartSupported;
+  setAutostartHint(
+    appState.autostartSupported ? info.autostartError : "Not available on this platform",
+  );
+}
+
+function setAutostartHint(msg) {
+  els.setAutostartHint.textContent = msg || "";
+  els.setAutostartHint.hidden = !msg;
+}
+
+async function handleAutostartToggle() {
+  const wanted = els.setAutostart.checked;
+  els.setAutostart.disabled = true;
+  try {
+    await nats.setAutostart(wanted);
+    setAutostartHint("");
+    ui.showToast(
+      wanted ? "nats-desk will start when you sign in" : "Autostart turned off",
+      "success",
+    );
+  } catch (err) {
+    // Put the checkbox back. It reports what the machine is set to, and a
+    // write that failed did not change that.
+    els.setAutostart.checked = !wanted;
+    setAutostartHint(err.message);
+    ui.showToast(err.message, "error");
+  } finally {
+    els.setAutostart.disabled = !appState.autostartSupported;
   }
 }
 

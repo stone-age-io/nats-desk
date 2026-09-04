@@ -23,9 +23,12 @@ real deployments.
   from one machine. No per-platform CI runner, no cgo toolchain, and - because
   Gatekeeper only fires on the `com.apple.quarantine` bit that `curl`, `brew`
   and `scoop` do not set - no code signing or notarization.
-- **App feel via PWA install.** `frontend/public/manifest.json` plus a
-  deliberately empty `sw.js`. `localhost` is a secure context, so Chrome and
-  Edge offer Install with no extra Go code.
+- **App feel from the binary, not from the PWA.** The exe opens a Chromium
+  `--app=` window: chromeless, its own taskbar button, nothing to install. The
+  PWA install still works and is still offered - `localhost` is a secure
+  context - but it is no longer the way in, because a PWA shortcut only
+  navigates and cannot start the process it needs. See "The PWA cannot be the
+  entry point" below.
 - **Loopback only, and authenticated.** The backend opens NATS connections with
   the user's stored credentials, so an open port here would be a credential
   exfiltration primitive.
@@ -49,6 +52,10 @@ make test
 make test-race       # needs cgo + a C compiler
 make test-coverage
 
+# Regenerate the Windows icon and version resources; commit the .syso output.
+# Not part of build - see the Makefile comment for why.
+make winres VERSION=1.0.0
+
 make fmt
 make lint
 make deps
@@ -65,8 +72,8 @@ nats-desk/
 │   ├── embed.go                # //go:embed all:dist  (must live beside dist)
 │   ├── api.js                  # replaces the old nats-client.js
 │   ├── main.js ui.js dom.js dialogs.js splitters.js utils.js storage.js
-│   ├── index.html style.css sw.js
-│   └── public/                 # manifest.json, icons
+│   ├── index.html style.css
+│   └── public/                 # manifest.json, icons, sw.js, offline.html
 ├── internal/
 │   ├── server/                 # HTTP: embed + SPA fallback, token, Host allowlist
 │   │   ├── server.go           # fixed port, single instance, idle shutdown
@@ -76,13 +83,149 @@ nats-desk/
 │   ├── api/                    # REST handlers
 │   ├── ws/                     # push channel: batching, drop accounting
 │   ├── natsconn/               # the NATS connection, pub/sub, subject rules
-│   ├── browse/                 # open a URL in the default browser
+│   ├── browse/                 # open a URL: a tab, or a chromeless app window
 │   ├── contexts/               # the nats CLI's own context store
-│   └── monitor/                # three monitoring sources, a grid and a feed
+│   ├── monitor/                # three monitoring sources, a grid and a feed
+│   ├── appdir/                 # the two per-user directories we write to
+│   ├── applog/                 # stderr, or a file when there is no console
+│   ├── autostart/              # start at sign-in: Run key, plist, .desktop
+│   ├── scheme/                 # the natsdesk:// handler
+│   └── buildinfo/              # the version, stamped in by the linker
 └── Makefile
 ```
 
 ## Things that are the way they are for a reason
+
+**The PWA cannot be the entry point, and that is not fixable from the browser
+side.** An installed PWA's shortcut only *navigates* to
+`http://127.0.0.1:4111`. With nothing listening it lands on the browser's own
+connection error, inside a chromeless window with no address bar - a dead end
+with nothing in it to press. A page cannot start a process. So the binary owns
+the lifecycle and the binary is what you click; three separate mechanisms
+patch the remaining gap, and each is needed for a different reason:
+
+- an **app window** (`--app=`), so clicking the exe already gives the
+  chromeless window the PWA was wanted for, with nothing installed
+- a **persisted token**, so a window that outlives the process still
+  authenticates when the process comes back
+- **autostart** and a **`natsdesk://` handler**, so the PWA shortcut has
+  something running to reach, or a way to start it
+
+**The Windows binary is linked `-H=windowsgui`, so it has no standard handles
+at all.** That is what stops a console flashing up on every launch, and it
+means `fmt.Print` and a stderr logger both write into a void. `internal/applog`
+picks the destination by calling `os.Stderr.Stat()` and falling back to a file
+- not by a build tag, because `make dev` runs `go run` and produces a console
+binary from the same source, which must keep printing to the terminal. The
+same check does the right thing for a shell that redirects our output: a pipe
+stats fine, so the log follows the pipe.
+
+**The log is appended to, not truncated per run, because runs overlap.** Every
+double-click of an already-running copy starts a second process that lives
+just long enough to find the port taken and exit. Truncating on open would
+mean each of those wiped the log of the instance actually doing the work.
+Growth is bounded by a size check at open instead.
+
+**The startup URL is printed to stdout and never logged.** It carries the
+token. The log is now a file that outlives the run.
+
+**The default browser is read out of the registry, not scanned for.** Edge is
+installed on every Windows machine, so any fixed-order path scan hands a
+Chrome user an Edge window - a different profile, none of their extensions,
+and any installed PWA living somewhere else entirely. `browse` follows the
+same two hops Explorer does, `UserChoice` then the ProgId's open command, and
+only falls back to a scan when that resolves to something with no `--app`
+flag, which in practice means Firefox.
+
+**The session token is persisted, and the cookie is persistent too.** Both
+halves are required and neither is sufficient. A token that changed per
+process would 401 every open window on restart; a session cookie would be
+discarded when the browser closed, so the installed app would still come back
+unauthenticated every morning. This is a real if narrow weakening of the token
+guard, and `internal/server/security.go` carries the argument for why it is
+worth it - in short, the credentials the token protects are already files in
+the same user profile. Deleting the token file is the revoke.
+
+**A token file is length-checked, not just decoded.** Go's base64 decoder
+*ignores* embedded newlines rather than rejecting them, so a token with a
+newline in it decodes to exactly 32 bytes and passes a decode check - and then
+never matches anything, because `http.SetCookie` strips the newline back out
+of the cookie it writes. The symptom is an app that is permanently
+unauthenticated for no visible reason. A *trailing* newline is trimmed rather
+than rejected, because any editor opening that file adds one.
+
+**Autostart is a registry Run value, and deliberately not a service.** A
+service runs as another account, and every credential this app opens NATS with
+- `.creds` files, `nats` CLI contexts - lives in the user's own profile. It
+would also mean an installer, administrator rights, and one shared port for
+every user signed in to the machine, which is a credential leak across
+accounts in a program whose whole security model is "loopback only, and
+authenticated". The Run key needs none of that. A Startup folder shortcut
+would have done equally well but requires building a `.lnk` through COM; this
+is a string.
+
+**Autostart and the scheme handler are both re-checked on every start.** Both
+record an absolute path to the executable. A binary that is moved, renamed or
+re-downloaded silently stops being the one that gets launched, and the failure
+is invisible - nothing happens at sign-in, and nothing says why. `Sync` only
+rewrites when the stored string differs, so the entry must be byte-stable
+between calls or it would rewrite on every start forever.
+
+**`sw.js` is no longer empty, and it never actually shipped when it was.** It
+sat at `frontend/` rather than `frontend/public/`, so vite never copied it and
+nothing registered it; the PWA was installable on the manifest and icons
+alone. It is now a real worker with exactly one job: serve `offline.html` when
+a *navigation* fails. Nothing else is cached, and that restraint is the point
+- an app shell served from cache while the backend is down looks like a
+working app and then fails every single call. Non-navigation requests are not
+intercepted at all, so a failed API call still surfaces as the transport error
+`api.js` already reports.
+
+**The offline page polls as well as offering a button.** The button navigates
+to `natsdesk://start`, which is the only way a page can ask an operating
+system to start a program. The poll is what recovers the window when the
+backend comes up some other way - the binary double-clicked, or a sign-in
+autostart finishing late - and it only runs while the document is visible, so
+an abandoned tab is not left hitting the port forever.
+
+**`natsdesk://start` must not open a window; `natsdesk://open` must.** Start is
+sent by a page that is already open and polling, so a second window would be
+noise. Open is the recovery path for the one case start cannot fix: a browser
+that has lost its cookie, where reloading in place reaches the app shell and
+then 401s. Note that the shell delivers the URL with a trailing slash added -
+`natsdesk://start/` - which is the common form, not the odd one.
+
+**macOS gets no URL scheme.** Schemes come from `CFBundleURLTypes` in an
+application bundle's `Info.plist`, and a bare executable has no bundle.
+Building one would mean shipping a directory instead of a file, which is the
+packaging this project is arranged to avoid. The offline page's button simply
+does nothing there, and the page says so.
+
+**An `--app=` window's taskbar icon comes from the *favicon*, not from the
+manifest.** That is why `index.html` points `rel="icon"` at `icon-192/512.png`
+and not at `logo.svg`. The bare mark is edge to edge with a knocked-out
+transparent interior, which is correct inside the UI - on a surface we control
+- and wrong on a taskbar, where it rendered as a hollow ring with no padding
+beside properly treated icons. The PNGs carry the launcher treatment: opaque
+white behind the knockout and margin around the disc, matching the other
+Stone-Age.io apps. `logo.svg` stays in `public/` as the vector source and is
+deliberately referenced by nothing.
+
+Three surfaces take an icon and they resolve differently, which is why getting
+one right does not get the others right: the **exe and any pinned shortcut**
+use the committed `.syso`, the **app window** uses the favicon, and an
+**installed PWA** uses the manifest icons. All three now come from the same
+PNG. To check the taskbar one for real rather than by eye, send `WM_GETICON`
+to the window and save the handle through `Icon.FromHandle` - the padding and
+the opaque corners are the tell.
+
+**The `.syso` resources are committed.** That is what makes a plain `go build`
+produce an exe with an icon, and it keeps the release build free of a
+downloaded tool. `make winres` regenerates them. One trap: Windows ignores the
+entire version string block unless `FileVersion` **and** `ProductVersion`
+appear in `StringFileInfo` as strings - the numeric `FixedFileInfo` values are
+not enough, and without them the properties dialog shows nothing at all while
+the icon still works, which makes it look like the resource did not build.
 
 **The port is fixed (4111) and must stay fixed.** An installed PWA's identity -
 and therefore its stored preferences - is its origin, and the origin includes
@@ -266,6 +409,32 @@ app is not using.
 `requestAnimationFrame` does not fire while the Browser pane is hidden, so it is
 useless as a responsiveness probe there. Use `setTimeout` lag instead.
 
+**Service workers cannot be tested in the Browser pane at all.**
+`'serviceWorker' in navigator` is true and `isSecureContext` is true, but
+`register()` fails with "An unknown error occurred when fetching the script"
+while the same script fetches fine with 200 and the right content type. The
+worker registers normally in real Chrome. Two ways to check it from outside
+the browser, both used to verify this for real:
+
+- Chrome's own registration store, `%LOCALAPPDATA%\Google\Chrome\User
+  Data\Default\Service Worker\Database` - grep the `.log`/`.ldb` files for the
+  origin, and a `REG:` entry naming `/sw.js` means it registered.
+- **Window titles**, which is the good one. `offline.html` is titled
+  "nats-desk is not running" and the app is titled "NATS Client", and an
+  `--app=` window's title has no " - Google Chrome" suffix where an ordinary
+  tab's does. So `EnumWindows` proves three separate things without driving a
+  browser: that the launch produced an *app* window rather than a tab, that
+  the offline page rendered with nothing listening, and that it recovered
+  itself once the backend came up.
+
+To produce the cold-PWA-click case by hand, stop the backend and run
+`chrome.exe --app=http://127.0.0.1:<port>/` directly. That is exactly what the
+installed shortcut does.
+
+`--app=` windows are deduplicated by Chrome: asking for one whose URL already
+has a window focuses the existing window instead of opening a second. Close
+the window first or a launch test will look like it did nothing.
+
 Test rig config lives in the scratchpad, not the repo. Two rigs, on separate
 ports so both run at once:
 
@@ -314,9 +483,17 @@ not provide. Use `make test-race` where a toolchain exists.
 
 Coverage is currently thin and concentrated on the logic that is easy to get
 silently wrong: the subject filter rules, the KV operation mapping, the
-batching/drop accounting, the context editor's round-trip fidelity, and the
-monitoring rate arithmetic. The HTTP and NATS layers are covered by driving the
+batching/drop accounting, the context editor's round-trip fidelity, the
+monitoring rate arithmetic, the `natsdesk://` argument parsing, and the token
+file's accept/reject rules. The HTTP and NATS layers are covered by driving the
 real UI against a real server, not by unit tests.
+
+No test writes to the real Run key, the real `Software\Classes`, or the real
+token path. Turning autostart on for whoever is running the suite is not a
+side effect a test is entitled to, so `internal/autostart` tests only the
+entry string - including that it is byte-stable, because `Sync` compares it
+and an unstable one would rewrite the registry on every start. The registry
+round-trip itself is verified by driving the real app.
 
 ## Status
 
@@ -329,3 +506,6 @@ real UI against a real server, not by unit tests.
 - **Phase 4 (done):** monitoring - data connection, separate `$SYS` connection
   and HTTP `:8222`, each independently configurable; a live cluster grid with
   rates, and an event feed.
+- **Phase 5 (done):** desktop integration - no console window, an app-mode
+  launch, a persisted session, autostart at sign-in, and a `natsdesk://`
+  handler with an offline page so an installed PWA can start its own backend.
