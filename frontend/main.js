@@ -76,10 +76,13 @@ const appState = {
   monitorServers: [],
   monitorServer: null,
 
-  // Services: the last census's instances, and what is selected in it. The
-  // endpoint is held by name, because that is what carries over from one
-  // instance to another - its subject usually does not.
+  // Services: the last census, and what is selected in it. The backend keeps
+  // nothing, so this is the only copy; servicesAt is null until a census has
+  // run on this connection. The endpoint is held by name, because that is
+  // what carries over from one instance to another - its subject usually
+  // does not.
   services: [],
+  servicesAt: null,
   serviceName: null,
   serviceId: null,
   serviceEndpoint: null,
@@ -2092,8 +2095,8 @@ els.streamMsgFilter.addEventListener("keyup", () =>
 // SERVICE HANDLERS
 // ============================================================================
 // NATS micro services, found over $SRV on the app's own connection. See
-// internal/services for why a census is INFO and STATS together, and why a
-// stopped instance is shown as gone for one census before it is dropped.
+// internal/services for why a census is INFO and STATS together. The backend
+// keeps nothing: the census lives in appState until the next one replaces it.
 
 function currentServiceInstance() {
   return appState.services.find((i) => i.id === appState.serviceId) || null;
@@ -2111,6 +2114,7 @@ function clearServiceInstance() {
 
 function resetServicesUi(message) {
   appState.services = [];
+  appState.servicesAt = null;
   appState.serviceName = null;
   appState.serviceEndpoint = null;
   clearServiceInstance();
@@ -2150,29 +2154,13 @@ function renderServices() {
   updateServiceReqHint();
 }
 
-function applyServicesSnapshot(snap) {
-  appState.services = snap.instances || [];
-  ui.renderServiceCensus(snap);
-  renderServices();
-}
-
 /**
- * Load the Services tab: the census the backend already holds, or a new one
- * when none has run on this connection yet.
+ * Load the Services tab. A census runs the first time it is opened on a
+ * connection; after that the list stays as it was until Refresh, and the
+ * census line says how old it is.
  */
-async function loadServices() {
-  if (!nats.isConnected()) return;
-  try {
-    const snap = await nats.getServices();
-    if (snap.at) {
-      applyServicesSnapshot(snap);
-      return;
-    }
-  } catch (err) {
-    ui.setEmpty(els.svcList, err.message, true);
-    return;
-  }
-  await handleServicesRefresh();
+function loadServices() {
+  if (nats.isConnected() && !appState.servicesAt) handleServicesRefresh();
 }
 
 async function handleServicesRefresh() {
@@ -2181,11 +2169,15 @@ async function handleServicesRefresh() {
 
   els.btnSvcRefresh.disabled = true;
   try {
-    applyServicesSnapshot(await nats.refreshServices());
+    const census = await nats.discoverServices();
+    appState.services = census.instances || [];
+    appState.servicesAt = census.at;
+    ui.renderServiceCensus(census);
+    renderServices();
   } catch (err) {
-    // A failed census leaves the backend's untouched, so a list on screen is
-    // still the last thing that was true and stays. An empty one is replaced
-    // by the reason, which is the more useful thing to put there.
+    // A list on screen is still the last thing that was true, so it stays.
+    // An empty one is replaced by the reason, which is the more useful thing
+    // to put there.
     if (shown) ui.showToast(err.message, "error");
     else ui.setEmpty(els.svcList, err.message, true);
   } finally {
@@ -2222,12 +2214,13 @@ function selectServiceInstance(id) {
   // The subject in the form belongs to one instance's endpoint, and in a
   // fleet where each instance has its own subjects - one per device - leaving
   // it there would send a request meant for this instance to the last one.
-  // So it follows the selection: the same endpoint here, or nothing.
+  // So it follows the selection: the same endpoint here, or nothing. The
+  // payload is the user's and stays either way.
   const ep = sameService && appState.serviceEndpoint
     ? utils.serviceEndpoints(inst).find((e) => e.name === appState.serviceEndpoint)
     : null;
   if (ep) {
-    selectServiceEndpoint(ep, { keepPayload: true, switchTab: false });
+    selectServiceEndpoint(ep, { switchTab: false });
     return;
   }
   appState.serviceEndpoint = null;
@@ -2237,19 +2230,11 @@ function selectServiceInstance(id) {
   updateServiceReqHint();
 }
 
-/**
- * Point the request form at an endpoint. The payload comes back from the last
- * time this endpoint of this service was sent one, unless the caller is only
- * moving the same endpoint to another instance - then what is typed stays.
- */
-function selectServiceEndpoint(ep, { keepPayload = false, switchTab = true } = {}) {
-  const inst = currentServiceInstance();
-  if (!inst) return;
-
+/** Point the request form at an endpoint. The payload is left as typed. */
+function selectServiceEndpoint(ep, { switchTab = true } = {}) {
   appState.serviceEndpoint = ep.name;
   els.svcReqSubject.value = ep.subject;
   ui.highlightServiceEndpoint(ep.name);
-  if (!keepPayload) els.svcReqPayload.value = storage.getServicePayload(inst.name, ep.name) ?? "";
   ui.clearServiceReply();
   updateServiceReqHint();
 
@@ -2277,7 +2262,7 @@ function updateServiceReqHint() {
   } else if (subject && inst) {
     const ep = utils.serviceEndpoints(inst).find((e) => e.subject === subject);
     const sharing = serviceGroup(inst.name).filter(
-      (i) => !i.gone && utils.serviceEndpoints(i).some((e) => e.subject === subject),
+      (i) => utils.serviceEndpoints(i).some((e) => e.subject === subject),
     ).length;
 
     if (ep && sharing > 1 && ep.queue_group) {
@@ -2286,8 +2271,6 @@ function updateServiceReqHint() {
     } else if (ep && sharing > 1) {
       hint = `${sharing} instances serve this subject with no queue group. ` +
         "All of them get the request, and the first reply is the one shown.";
-    } else if (ep && inst.gone && sharing === 0) {
-      hint = "This instance did not answer the last census, so nothing may be listening here.";
     }
   }
 
@@ -2310,7 +2293,6 @@ async function handleServiceSend() {
   const timeout = parseInt(els.svcReqTimeout.value, 10) || DEFAULT_RPC_TIMEOUT_MS;
   const inst = currentServiceInstance();
   const ep = inst && utils.serviceEndpoints(inst).find((e) => e.subject === subject);
-  if (ep) storage.setServicePayload(inst.name, ep.name, payload);
 
   els.btnSvcSend.disabled = true;
   const started = performance.now();
@@ -2328,15 +2310,14 @@ async function handleServiceSend() {
   if (ep) refreshServiceStats({ quiet: true });
 }
 
-/** Ask the selected instance for its stats now, and fold them into the census. */
+/** Ask the selected instance for its stats now, and put them in the census. */
 async function refreshServiceStats({ quiet = false } = {}) {
   const inst = currentServiceInstance();
   if (!inst) return;
   try {
-    const fresh = await nats.refreshServiceStats(inst.name, inst.id);
-    appState.services = appState.services.map((i) => (i.id === fresh.id ? fresh : i));
+    const stats = await nats.getServiceStats(inst.name, inst.id);
+    appState.services = appState.services.map((i) => (i.id === inst.id ? { ...i, stats } : i));
     renderServices();
-    if (fresh.gone && !inst.gone) ui.showToast(`${fresh.name} ${fresh.id} is no longer answering`, "info");
   } catch (err) {
     if (!quiet) ui.showToast(err.message, "error");
   }

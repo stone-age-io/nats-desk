@@ -630,19 +630,14 @@ export async function getMonitorHttpEndpoint(name) {
 // request to an endpoint is not here: it is an ordinary request to the
 // endpoint's subject, so it goes through request() above.
 
-/** The last census, without asking anyone. `at` is absent until one has run. */
-export async function getServices() {
+/** A census: INFO and STATS to every service at once. Nothing is kept server-side. */
+export async function discoverServices() {
   return get("/api/services");
 }
 
-/** INFO and STATS to every service at once. Replaces the census. */
-export async function refreshServices() {
-  return post("/api/services/refresh");
-}
-
-/** Ask one instance for its stats now. Returns the updated instance. */
-export async function refreshServiceStats(name, id) {
-  return post(`/api/services/${encodeURIComponent(name)}/${encodeURIComponent(id)}/stats`);
+/** One instance's STATS reply, asked for now. */
+export async function getServiceStats(name, id) {
+  return get(`/api/services/${encodeURIComponent(name)}/${encodeURIComponent(id)}/stats`);
 }
 
 // ============================================================================

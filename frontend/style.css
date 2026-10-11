@@ -424,7 +424,6 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
    shrink below its content. */
 #svcInstances .mon-table { min-width: 0; }
 #svcInstances td.grow { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
-#svcInstances td.gone { color: var(--danger); text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.04em; }
 
 .svc-census { padding: var(--s2) var(--s3) 0; font-size: 0.7rem; line-height: 1.45; color: var(--muted-dim); }
 .svc-census .bad { color: var(--danger); }
@@ -442,7 +441,6 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
 .mon-table td.last-err { max-width: 220px; overflow: hidden; text-overflow: ellipsis; color: var(--danger); }
 .mon-table td.hot { color: var(--danger); font-weight: 600; }
 
-.svc-gone { font-size: 0.72rem; color: var(--danger); }
 .svc-desc { font-size: 0.78rem; color: var(--text); }
 .svc-meta { display: flex; flex-wrap: wrap; gap: var(--s1); margin-top: var(--s1); }
 .meta-chip {

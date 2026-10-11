@@ -20,7 +20,6 @@ const KEYS = {
   LOG_NEWEST_FIRST: "nats_log_newest_first",
   PANE_SIZES: "nats_pane_sizes",
   MONITOR_HTTP: "nats_monitor_http",
-  SERVICE_PAYLOADS: "nats_service_payloads",
 };
 
 // ============================================================================
@@ -30,7 +29,6 @@ const KEYS = {
 const MAX_SUBJECT_HISTORY = 50;
 const MAX_URL_HISTORY = 10;
 const MAX_SAVED_SUBS_PER_SERVER = 30;
-const MAX_SERVICE_PAYLOADS = 100;
 
 // ============================================================================
 // GENERIC JSON HELPERS
@@ -303,39 +301,6 @@ export function setMonitorHttp(cfg) {
     return;
   }
   saveJson(KEYS.MONITOR_HTTP, cfg);
-}
-
-// ============================================================================
-// SERVICES: LAST PAYLOAD PER ENDPOINT
-// ============================================================================
-// Shape: { "service/endpoint": "payload" }, oldest first.
-//
-// Keyed by service and endpoint name, never by instance: an instance ID is new
-// every time the process restarts, so a payload keyed on it would be lost on
-// the next deploy. Least recently used goes first past the cap.
-
-function payloadKey(service, endpoint) {
-  return `${service}/${endpoint}`;
-}
-
-export function getServicePayload(service, endpoint) {
-  const all = loadJson(KEYS.SERVICE_PAYLOADS, {});
-  return all[payloadKey(service, endpoint)] ?? null;
-}
-
-export function setServicePayload(service, endpoint, payload) {
-  const all = loadJson(KEYS.SERVICE_PAYLOADS, {});
-  const key = payloadKey(service, endpoint);
-
-  // Re-inserting moves the key to the end, which is what makes the
-  // first key the least recently used one.
-  delete all[key];
-  if (payload) all[key] = payload;
-
-  const keys = Object.keys(all);
-  for (let i = 0; i < keys.length - MAX_SERVICE_PAYLOADS; i++) delete all[keys[i]];
-
-  saveJson(KEYS.SERVICE_PAYLOADS, all);
 }
 
 // ============================================================================

@@ -423,21 +423,16 @@ So zero replies with no "no responders" is reported as an error that names
 helper the account view uses - reports exactly that distinction, which is why
 it is reused rather than reimplemented.
 
-**A stopped instance is shown as gone for one census, then dropped.** micro
-mints a new ID per process, so every restart leaves an ID that will never
-answer again. Keeping those forever fills the list; dropping them at once means
-a list that silently loses a line. The compromise is one census of `gone`.
-An instance left out by the cap (`maxInstances`) *did* answer, so it is never
-marked gone - `Truncated` already accounts for it. Asked directly for its stats,
-a stopped instance answers "no responders" and is marked gone with no error:
-gone is a state the UI shows, not a failure. A timeout stays an error, because
-the instance may be alive and slow.
-
-**A census belongs to the `*nats.Conn` it ran on.** `Catalog.Snapshot()`
-discards it the first time it sees a different connection, so connecting to
-another server or as another user cannot show services from the last one. No
-wiring into `Manager` is needed for that, and a reconnect - same `*nats.Conn` -
-keeps the census, as it should.
+**The backend stores nothing about services.** `services.Discover` and
+`services.Stats` are plain functions over the data connection: asked, answered,
+handed back. The UI holds the census and the next one replaces it, so a
+restarted instance - micro mints a new ID per process - shows as its old row
+going and a new one arriving. An earlier version kept the census server-side
+and marked missing instances "gone" for one census; it needed a connection
+check, a merge and a cap exception, and bought a nicety. Do not bring it back
+without a real need. Asked directly for its stats, a stopped instance answers
+"no responders" (`ErrStopped`); a timeout stays a separate error, because the
+instance may be alive and slow.
 
 **An endpoint is a subject, not an address, and the request form says so.**
 Instances usually share an endpoint's subject, so a request opened from one
@@ -448,12 +443,11 @@ ordinary `/api/request`, so there is one request path with one set of timeout
 and no-responder messages.
 
 **The subject follows the selected instance.** In a fleet where each instance
-has its own subjects - the stone-age agent registers `agents.<code>.cmd.*` per
+has its own subjects - a device fleet registering `<prefix>.<device>.cmd.*` per
 device - switching instance with an endpoint selected moves the subject to the
 same endpoint on the new instance, and clears it if there is none. Leaving the
 old one in the box would send a request meant for one device to another. The
-payload is the user's and stays. Payloads are remembered per *service and
-endpoint name*, never per instance ID, because the ID is new on every restart.
+payload is the user's and stays.
 
 ## Testing notes
 
@@ -576,5 +570,5 @@ round-trip itself is verified by driving the real app.
   launch, a persisted session, autostart at sign-in, and a `natsdesk://`
   handler with an offline page so an installed PWA can start its own backend.
 - **Phase 6 (done):** micro services - `$SRV` discovery on the data connection,
-  instances with their stats, a request form per endpoint that reads micro's
-  error headers, and gone marking across restarts.
+  instances with their stats, and a request form per endpoint that reads
+  micro's error headers.

@@ -119,11 +119,8 @@ nothing to configure.
 - **Honest about who answers:** an endpoint is a subject that instances usually
   share, and the form says whether one of a queue group or the fastest of them
   all will reply, not just the instance you clicked
-- **Restarts are visible:** an instance that stops answering is marked gone
-  for one refresh before it is dropped, so a restart shows as an old ID going
-  and a new one arriving
-- **Remembers payloads** per service and endpoint, and hands a request to the
-  Messaging composer when it needs headers or a template
+- **Open in Messaging** hands a request to the composer when it needs headers
+  or a template
 
 ### Monitoring
 Three sources, each configured on its own, because they are not

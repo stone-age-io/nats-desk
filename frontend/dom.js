@@ -201,7 +201,6 @@ export const els = {
   svcDetailView: $("svcDetailView"),
   svcTitle: $("svcTitle"),
   svcSubtitle: $("svcSubtitle"),
-  svcGone: $("svcGone"),
   svcDescription: $("svcDescription"),
   svcMeta: $("svcMeta"),
   btnSvcStats: $("btnSvcStats"),

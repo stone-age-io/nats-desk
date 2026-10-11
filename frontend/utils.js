@@ -161,25 +161,18 @@ export function serviceTotals(inst) {
 }
 
 /**
- * One entry per service name, in census order. Versions and errors count live
- * instances only: a gone one's stats are its last words, not its state. errors
- * stays null when no live instance answered STATS, for the same reason
- * serviceTotals returns null.
+ * One entry per service name, in census order. errors stays null when no
+ * instance answered STATS, for the same reason serviceTotals returns null.
  */
 export function groupServices(instances) {
   const groups = new Map();
   for (const inst of instances) {
     let g = groups.get(inst.name);
     if (!g) {
-      g = { name: inst.name, instances: [], live: 0, gone: 0, versions: new Set(), errors: null };
+      g = { name: inst.name, instances: [], versions: new Set(), errors: null };
       groups.set(inst.name, g);
     }
     g.instances.push(inst);
-    if (inst.gone) {
-      g.gone++;
-      continue;
-    }
-    g.live++;
     g.versions.add(inst.version);
     const t = serviceTotals(inst);
     if (t) g.errors = (g.errors || 0) + t.errors;

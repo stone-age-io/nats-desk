@@ -15,7 +15,6 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/stone-age-io/nats-desk/internal/monitor"
 	"github.com/stone-age-io/nats-desk/internal/natsconn"
-	"github.com/stone-age-io/nats-desk/internal/services"
 )
 
 // Mounter is the subset of server.Server this package needs, so the two
@@ -27,12 +26,11 @@ type Mounter interface {
 type API struct {
 	mgr *natsconn.Manager
 	mon *monitor.Monitor
-	svc *services.Catalog
 	log *slog.Logger
 }
 
-func New(mgr *natsconn.Manager, mon *monitor.Monitor, svc *services.Catalog, log *slog.Logger) *API {
-	return &API{mgr: mgr, mon: mon, svc: svc, log: log}
+func New(mgr *natsconn.Manager, mon *monitor.Monitor, log *slog.Logger) *API {
+	return &API{mgr: mgr, mon: mon, log: log}
 }
 
 func (a *API) Register(m Mounter) {

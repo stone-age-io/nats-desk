@@ -575,10 +575,10 @@ export function renderServiceCensus(snap) {
     return;
   }
 
-  const live = snap.instances.filter((i) => !i.gone).length;
+  const n = snap.instances.length;
   const line = document.createElement("div");
   line.textContent =
-    `${new Date(snap.at).toLocaleTimeString()} · ${live.toLocaleString()} instance${live === 1 ? "" : "s"}`;
+    `${new Date(snap.at).toLocaleTimeString()} · ${n.toLocaleString()} instance${n === 1 ? "" : "s"}`;
   const lines = [line];
 
   // Anything the census could not show is said, never silently left out.
@@ -616,10 +616,10 @@ export function renderServiceList(groups, onSelect) {
     name.className = "svc-name";
     name.textContent = g.name;
 
-    const parts = [`${g.live} instance${g.live === 1 ? "" : "s"}`];
+    const n = g.instances.length;
+    const parts = [`${n} instance${n === 1 ? "" : "s"}`];
     if (g.versions.size === 1) parts.push([...g.versions][0]);
     else if (g.versions.size > 1) parts.push(`${g.versions.size} versions`);
-    if (g.gone) parts.push(`${g.gone} gone`);
     const sub = document.createElement("span");
     sub.className = "svc-sub";
     sub.textContent = parts.join(" · ");
@@ -687,21 +687,14 @@ export function renderServiceInstances(name, instances, onSelect) {
     const label = meta || inst.id;
     const tip = meta ? `${inst.id}\n${meta}` : inst.id;
     const noStats = t ? "" : ' title="This instance did not answer STATS"';
-
-    // A gone instance's uptime is its last report, not a fact about now, so
-    // the column says what is true instead.
-    const up = inst.gone
-      ? '<td class="num gone">gone</td>'
-      : `<td class="num"${started ? ` title="${utils.escapeHtml(new Date(started).toLocaleString())}"` : ""}>` +
-        `${started ? utils.formatAge(now - Date.parse(started)) : "-"}</td>`;
+    const startedTip = started ? ` title="${utils.escapeHtml(new Date(started).toLocaleString())}"` : "";
 
     const tr = document.createElement("tr");
     tr.dataset.id = inst.id;
-    if (inst.gone) tr.classList.add("stale");
     tr.innerHTML =
       `<td class="grow" title="${utils.escapeHtml(tip)}">${utils.escapeHtml(label)}</td>` +
       `<td>${utils.escapeHtml(inst.version)}</td>` +
-      up +
+      `<td class="num"${startedTip}>${started ? utils.formatAge(now - Date.parse(started)) : "-"}</td>` +
       `<td class="num"${noStats}>${t ? t.requests.toLocaleString() : "-"}</td>` +
       `<td class="num${t && t.errors ? " hot" : ""}"${noStats}>${t ? t.errors.toLocaleString() : "-"}</td>`;
     tr.addEventListener("click", () => onSelect(inst.id));
@@ -726,8 +719,6 @@ export function renderServiceDetail(inst) {
   if (started) bits.push(`up ${utils.formatAge(Date.now() - Date.parse(started))}`);
   els.svcSubtitle.textContent = bits.join(" · ");
   els.svcSubtitle.title = started ? `Started ${new Date(started).toLocaleString()}` : "";
-
-  els.svcGone.hidden = !inst.gone;
 
   const desc = inst.info && inst.info.description;
   els.svcDescription.textContent = desc || "";

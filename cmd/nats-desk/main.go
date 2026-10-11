@@ -24,7 +24,6 @@ import (
 	"github.com/stone-age-io/nats-desk/internal/natsconn"
 	"github.com/stone-age-io/nats-desk/internal/scheme"
 	"github.com/stone-age-io/nats-desk/internal/server"
-	"github.com/stone-age-io/nats-desk/internal/services"
 	"github.com/stone-age-io/nats-desk/internal/ws"
 )
 
@@ -134,12 +133,8 @@ func run() error {
 	mon := monitor.New(mgr, hub, log)
 	defer mon.Close()
 
-	// Service discovery borrows it too: $SRV is an ordinary subject in the
-	// user's own account, so it needs nothing else.
-	svc := services.New(mgr)
-
 	srv.Mount("/ws", hub)
-	api.New(mgr, mon, svc, log).Register(srv)
+	api.New(mgr, mon, log).Register(srv)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
