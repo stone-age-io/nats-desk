@@ -86,6 +86,7 @@ nats-desk/
 │   ├── browse/                 # open a URL: a tab, or a chromeless app window
 │   ├── contexts/               # the nats CLI's own context store
 │   ├── monitor/                # three monitoring sources, a grid and a feed
+│   ├── services/               # $SRV discovery: the census, one instance's stats
 │   ├── appdir/                 # the two per-user directories we write to
 │   ├── applog/                 # stderr, or a file when there is no console
 │   ├── autostart/              # start at sign-in: Run key, plist, .desktop
@@ -399,6 +400,61 @@ inconsistent about this, using `Object.entries` for stream messages and bare
 iteration for live ones. It now uses `Object.entries` throughout. The UI has no
 NATS library any more and should not expect one of its types.
 
+**The Services tab is $SRV over the data connection, and needs nothing else.**
+`$SRV.PING|INFO|STATS` are ordinary subjects in the user's own account, not
+system subjects, so unlike `$SYS` monitoring there is no second connection and
+no system user. A credential without publish rights on `$SRV.>` simply cannot
+use the tab, and is told so (below).
+
+**A census is INFO and STATS together, and never PING.** INFO says what each
+instance is and what it serves, STATS how it is doing; the two scatter-gathers
+run concurrently and are joined on the instance ID. Everything PING carries is
+in INFO. Both replies are passed through raw, for the same reason the monitor
+passes the server's endpoints through: a service may add to them (STATS
+carries a custom `data` per endpoint), and re-modelling them would show less
+than the service said. An instance that answered INFO but not STATS has no
+`stats` at all, not zeros - the same rule as a rate being a pointer.
+
+**Silence is not an empty account.** With nothing subscribed to `$SRV.INFO`,
+the server answers "no responders" at once, and that is a complete answer: no
+services. A publish the server *refuses* produces no such reply, only a timeout.
+So zero replies with no "no responders" is reported as an error that names
+`$SRV.>` permissions, never shown as an empty list. jsm.go's `DoReq` - the same
+helper the account view uses - reports exactly that distinction, which is why
+it is reused rather than reimplemented.
+
+**A stopped instance is shown as gone for one census, then dropped.** micro
+mints a new ID per process, so every restart leaves an ID that will never
+answer again. Keeping those forever fills the list; dropping them at once means
+a list that silently loses a line. The compromise is one census of `gone`.
+An instance left out by the cap (`maxInstances`) *did* answer, so it is never
+marked gone - `Truncated` already accounts for it. Asked directly for its stats,
+a stopped instance answers "no responders" and is marked gone with no error:
+gone is a state the UI shows, not a failure. A timeout stays an error, because
+the instance may be alive and slow.
+
+**A census belongs to the `*nats.Conn` it ran on.** `Catalog.Snapshot()`
+discards it the first time it sees a different connection, so connecting to
+another server or as another user cannot show services from the last one. No
+wiring into `Manager` is needed for that, and a reconnect - same `*nats.Conn` -
+keeps the census, as it should.
+
+**An endpoint is a subject, not an address, and the request form says so.**
+Instances usually share an endpoint's subject, so a request opened from one
+instance reaches whichever answers: one of a queue group, or the fastest of
+all of them with no queue group. The form shows who a request will actually
+reach rather than implying the selected instance. Requests go through the
+ordinary `/api/request`, so there is one request path with one set of timeout
+and no-responder messages.
+
+**The subject follows the selected instance.** In a fleet where each instance
+has its own subjects - the stone-age agent registers `agents.<code>.cmd.*` per
+device - switching instance with an endpoint selected moves the subject to the
+same endpoint on the new instance, and clears it if there is none. Leaving the
+old one in the box would send a request meant for one device to another. The
+payload is the user's and stays. Payloads are remembered per *service and
+endpoint name*, never per instance ID, because the ID is new on every restart.
+
 ## Testing notes
 
 Drive the **real UI** against a **real `nats-server`**. Do not verify through
@@ -488,6 +544,16 @@ monitoring rate arithmetic, the `natsdesk://` argument parsing, and the token
 file's accept/reject rules. The HTTP and NATS layers are covered by driving the
 real UI against a real server, not by unit tests.
 
+`internal/services` is the exception: its tests start a real `nats-server` in
+the test process (loopback, random port) and register real micro services.
+What they check is mostly the server's behaviour - what "no responders" looks
+like, what a refused publish looks like, when an unsubscribe takes effect - and
+a fake would only encode guesses about all three. `censusTimeout` and
+`maxInstances` are vars so the refusal and cap tests do not wait seconds or
+start thousands of services. To stop an instance deterministically, `Stop()`
+it and `Flush()` its connection: the flush returns only after the server has
+processed the unsubscribes.
+
 No test writes to the real Run key, the real `Software\Classes`, or the real
 token path. Turning autostart on for whoever is running the suite is not a
 side effect a test is entitled to, so `internal/autostart` tests only the
@@ -509,3 +575,6 @@ round-trip itself is verified by driving the real app.
 - **Phase 5 (done):** desktop integration - no console window, an app-mode
   launch, a persisted session, autostart at sign-in, and a `natsdesk://`
   handler with an offline page so an installed PWA can start its own backend.
+- **Phase 6 (done):** micro services - `$SRV` discovery on the data connection,
+  instances with their stats, a request form per endpoint that reads micro's
+  error headers, and gone marking across restarts.

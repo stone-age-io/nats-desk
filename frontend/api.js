@@ -624,6 +624,28 @@ export async function getMonitorHttpEndpoint(name) {
 }
 
 // ============================================================================
+// SERVICES
+// ============================================================================
+// NATS micro services, discovered over $SRV on the app's own connection. A
+// request to an endpoint is not here: it is an ordinary request to the
+// endpoint's subject, so it goes through request() above.
+
+/** The last census, without asking anyone. `at` is absent until one has run. */
+export async function getServices() {
+  return get("/api/services");
+}
+
+/** INFO and STATS to every service at once. Replaces the census. */
+export async function refreshServices() {
+  return post("/api/services/refresh");
+}
+
+/** Ask one instance for its stats now. Returns the updated instance. */
+export async function refreshServiceStats(name, id) {
+  return post(`/api/services/${encodeURIComponent(name)}/${encodeURIComponent(id)}/stats`);
+}
+
+// ============================================================================
 // DESKTOP
 // ============================================================================
 // The local process itself: what version it is, where it lives, and whether

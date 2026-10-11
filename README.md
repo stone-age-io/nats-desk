@@ -107,6 +107,24 @@ saved settings stay on the old one. Pick a port once.
   filter, as a single batch rather than one request per message
 - **Live tail:** follow new messages as they arrive
 
+### Services
+[NATS micro](https://github.com/nats-io/nats.go/tree/main/micro) services,
+found over `$SRV` on the connection the app already has - no system user and
+nothing to configure.
+
+- **Census:** every service and every running instance, with its endpoints,
+  request and error counts, average processing time and last error
+- **Request form** per endpoint, which reads micro's error headers so a
+  service's `400` shows as an error rather than a reply with an odd body
+- **Honest about who answers:** an endpoint is a subject that instances usually
+  share, and the form says whether one of a queue group or the fastest of them
+  all will reply, not just the instance you clicked
+- **Restarts are visible:** an instance that stops answering is marked gone
+  for one refresh before it is dropped, so a restart shows as an old ID going
+  and a new one arriving
+- **Remembers payloads** per service and endpoint, and hands a request to the
+  Messaging composer when it needs headers or a template
+
 ### Monitoring
 Three sources, each configured on its own, because they are not
 interchangeable:

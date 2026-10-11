@@ -162,6 +162,7 @@
     <button class="tab active" data-tab="msg" role="tab" aria-selected="true" aria-controls="panel-msg">Messaging</button>
     <button class="tab" data-tab="kv" role="tab" aria-selected="false" aria-controls="panel-kv">KV Store</button>
     <button class="tab" data-tab="stream" role="tab" aria-selected="false" aria-controls="panel-stream">Streams</button>
+    <button class="tab" data-tab="services" role="tab" aria-selected="false" aria-controls="panel-services">Services</button>
     <button class="tab" data-tab="monitor" role="tab" aria-selected="false" aria-controls="panel-monitor">Monitor</button>
   </nav>
 
@@ -452,6 +453,110 @@
       </div>
     </section>
 
+    <!-- ================================================================== -->
+    <!-- SERVICES                                                           -->
+    <!-- ================================================================== -->
+    <!--
+      NATS micro services, found through $SRV on the app's own connection.
+      Three panes, narrowing left to right: every service, the running copies
+      of one, and the endpoints of one copy.
+    -->
+    <section class="tab-panel" data-tab-panel="services" id="panel-services" role="tabpanel" hidden>
+      <div class="panes panes-services" data-panes="services">
+
+        <div class="pane pane-list">
+          <div class="pane-head">
+            <h3>Services <span id="svcCount" class="accent">(0)</span></h3>
+            <div class="pane-actions">
+              <button id="btnSvcRefresh" class="sm-btn" title="Ask every service to report in" data-requires-conn>&#10227;</button>
+            </div>
+          </div>
+          <div id="svcCensus" class="svc-census" hidden></div>
+          <input type="text" id="svcFilter" class="pane-filter" placeholder="Filter services&#8230;"
+                 autocorrect="off" autocapitalize="off" spellcheck="false" />
+          <div id="svcList" class="list-scroll"><div class="empty">Not connected</div></div>
+        </div>
+
+        <div class="splitter" data-col="0" role="separator" tabindex="0"
+             aria-orientation="vertical" aria-label="Resize Services pane"></div>
+
+        <div class="pane">
+          <div class="pane-head">
+            <h3 id="svcInstancesLabel">Instances</h3>
+          </div>
+          <div id="svcInstances" class="list-scroll mon-scroll">
+            <div class="empty">Select a service</div>
+          </div>
+        </div>
+
+        <div class="splitter" data-col="1" role="separator" tabindex="0"
+             aria-orientation="vertical" aria-label="Resize Instances pane"></div>
+
+        <div class="pane pane-detail">
+          <div id="svcEmptyState" class="empty empty-fill">Select an instance to see its endpoints</div>
+
+          <div id="svcDetailView" class="detail-body" hidden>
+            <div class="pane-head detail-head">
+              <div class="detail-title">
+                <h2 id="svcTitle">Service</h2>
+                <span id="svcSubtitle" class="muted-xs"></span>
+                <span id="svcGone" class="svc-gone" hidden>Did not answer the last census</span>
+                <span id="svcDescription" class="svc-desc" hidden></span>
+                <div id="svcMeta" class="svc-meta" hidden></div>
+              </div>
+              <div class="pane-actions">
+                <button id="btnSvcStats" class="sm-btn" title="Ask this instance for its stats now" data-requires-conn>&#10227; Stats</button>
+              </div>
+            </div>
+
+            <nav class="subtabs" data-subtabs="services" role="tablist" aria-label="Instance detail">
+              <button class="subtab active" data-subtab="endpoints" role="tab" aria-selected="true">
+                Endpoints <span id="svcEndpointCount" class="pill-count">0</span>
+              </button>
+              <button class="subtab" data-subtab="request" role="tab" aria-selected="false">Request</button>
+              <button class="subtab" data-subtab="raw" role="tab" aria-selected="false">Raw</button>
+            </nav>
+
+            <div class="subtab-panel" data-subtab-panel="endpoints" role="tabpanel">
+              <div id="svcEndpoints" class="list-scroll mon-scroll"></div>
+            </div>
+
+            <div class="subtab-panel scrolls" data-subtab-panel="request" role="tabpanel" hidden>
+              <div class="svc-req-row">
+                <input type="text" id="svcReqSubject" placeholder="Pick an endpoint, or type a subject"
+                       autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <span class="composer-send">
+                  <button id="btnSvcSend" class="accent" data-requires-conn>Send</button>
+                </span>
+              </div>
+              <div id="svcReqHint" class="creds-hint" hidden></div>
+              <textarea id="svcReqPayload" class="svc-payload" placeholder="Payload (Ctrl+Enter to send)"
+                        autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+              <div class="composer-opts">
+                <div class="composer-opts-group">
+                  <button id="btnSvcFormat" class="sm-btn" title="Pretty-print the payload as JSON">Format</button>
+                  <button id="btnSvcToComposer" class="sm-btn"
+                          title="Copy subject and payload into Messaging, for headers and templates">Open in Messaging</button>
+                </div>
+                <label class="inline-field">
+                  Timeout
+                  <input type="number" id="svcReqTimeout" value="2000" class="sm-input timeout"
+                         aria-label="Request timeout in milliseconds" /> ms
+                </label>
+              </div>
+              <div id="svcReply" class="svc-reply">
+                <div class="empty">The reply appears here</div>
+              </div>
+            </div>
+
+            <div class="subtab-panel" data-subtab-panel="raw" role="tabpanel" hidden>
+              <div id="svcRaw" class="list-scroll"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
 
     <!-- ================================================================== -->
     <!-- MONITOR                                                            -->

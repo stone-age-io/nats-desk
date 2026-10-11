@@ -188,6 +188,36 @@ export const els = {
   btnConsumerCreate: $("btnConsumerCreate"),
   btnLoadConsumers: $("btnLoadConsumers"),
 
+  // --- Services ---------------------------------------------------------------
+  svcCount: $("svcCount"),
+  btnSvcRefresh: $("btnSvcRefresh"),
+  svcCensus: $("svcCensus"),
+  svcFilter: $("svcFilter"),
+  svcList: $("svcList"),
+  svcInstancesLabel: $("svcInstancesLabel"),
+  svcInstances: $("svcInstances"),
+
+  svcEmptyState: $("svcEmptyState"),
+  svcDetailView: $("svcDetailView"),
+  svcTitle: $("svcTitle"),
+  svcSubtitle: $("svcSubtitle"),
+  svcGone: $("svcGone"),
+  svcDescription: $("svcDescription"),
+  svcMeta: $("svcMeta"),
+  btnSvcStats: $("btnSvcStats"),
+  svcEndpointCount: $("svcEndpointCount"),
+  svcEndpoints: $("svcEndpoints"),
+  svcRaw: $("svcRaw"),
+
+  svcReqSubject: $("svcReqSubject"),
+  svcReqHint: $("svcReqHint"),
+  svcReqPayload: $("svcReqPayload"),
+  svcReqTimeout: $("svcReqTimeout"),
+  btnSvcSend: $("btnSvcSend"),
+  btnSvcFormat: $("btnSvcFormat"),
+  btnSvcToComposer: $("btnSvcToComposer"),
+  svcReply: $("svcReply"),
+
   // --- Streams: messages ----------------------------------------------------
   msgStartSeq: $("msgStartSeq"),
   msgEndSeq: $("msgEndSeq"),

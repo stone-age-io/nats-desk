@@ -76,6 +76,14 @@ const appState = {
   monitorServers: [],
   monitorServer: null,
 
+  // Services: the last census's instances, and what is selected in it. The
+  // endpoint is held by name, because that is what carries over from one
+  // instance to another - its subject usually does not.
+  services: [],
+  serviceName: null,
+  serviceId: null,
+  serviceEndpoint: null,
+
   // Whether this platform can start the app at sign-in. Remembered because
   // the toggle is re-enabled after every write and must not become usable on
   // a platform that cannot honour it.
@@ -120,6 +128,7 @@ function initializeApp() {
   setupSubTabNavigation();
   setupSubscriptionEventDelegation();
   setupConsumerEventDelegation();
+  setupServiceEventDelegation();
   setupHeaderEditor();
   setupFallbackPopover(els.btnConnStatus, els.connPopover);
   setupFallbackPopover(els.btnSettings, els.settingsPopover);
@@ -174,6 +183,7 @@ function setupTabNavigation() {
     if (!nats.isConnected()) return;
     if (name === "kv") loadKvBucketsWrapper();
     else if (name === "stream") loadStreamsWrapper();
+    else if (name === "services") loadServices();
   });
 }
 
@@ -389,6 +399,8 @@ function resetDataPanels() {
   appState.currentStream = null;
   els.streamDetailView.hidden = true;
   els.streamEmptyState.hidden = false;
+
+  resetServicesUi("Not connected");
 }
 
 async function handleConnect() {
@@ -489,6 +501,7 @@ async function handleConnect() {
     const tab = ui.getActiveTab();
     if (tab === "kv") loadKvBucketsWrapper();
     else if (tab === "stream") loadStreamsWrapper();
+    else if (tab === "services") loadServices();
   } catch (err) {
     console.error("Connection error:", err);
     ui.setConnectionState("disconnected");
@@ -2074,3 +2087,288 @@ els.streamFilter.addEventListener("keyup", () => ui.filterList(els.streamFilter,
 els.streamMsgFilter.addEventListener("keyup", () =>
   ui.filterList(els.streamMsgFilter, els.streamMsgContainer, ".stream-msg-entry")
 );
+
+// ============================================================================
+// SERVICE HANDLERS
+// ============================================================================
+// NATS micro services, found over $SRV on the app's own connection. See
+// internal/services for why a census is INFO and STATS together, and why a
+// stopped instance is shown as gone for one census before it is dropped.
+
+function currentServiceInstance() {
+  return appState.services.find((i) => i.id === appState.serviceId) || null;
+}
+
+function serviceGroup(name) {
+  return name ? appState.services.filter((i) => i.name === name) : [];
+}
+
+function clearServiceInstance() {
+  appState.serviceId = null;
+  els.svcDetailView.hidden = true;
+  els.svcEmptyState.hidden = false;
+}
+
+function resetServicesUi(message) {
+  appState.services = [];
+  appState.serviceName = null;
+  appState.serviceEndpoint = null;
+  clearServiceInstance();
+
+  els.svcCount.textContent = "(0)";
+  ui.renderServiceCensus(null);
+  ui.setEmpty(els.svcList, message);
+  ui.renderServiceInstances(null, [], selectServiceInstance);
+  els.svcReqSubject.value = "";
+  updateServiceReqHint();
+  ui.clearServiceReply();
+}
+
+/**
+ * Paint all three panes from appState. A selection survives wherever what it
+ * points at still exists, so a refresh never throws away the instance being
+ * worked on - and never touches the request form, which is the user's.
+ */
+function renderServices() {
+  ui.renderServiceList(utils.groupServices(appState.services), selectService);
+  if (els.svcFilter.value) ui.filterList(els.svcFilter, els.svcList);
+
+  if (appState.serviceName && !appState.services.some((i) => i.name === appState.serviceName)) {
+    appState.serviceName = null;
+  }
+  ui.highlightService(appState.serviceName);
+  ui.renderServiceInstances(appState.serviceName, serviceGroup(appState.serviceName), selectServiceInstance);
+
+  const inst = currentServiceInstance();
+  if (!inst) {
+    clearServiceInstance();
+    return;
+  }
+  ui.highlightServiceInstance(inst.id);
+  ui.renderServiceDetail(inst);
+  ui.highlightServiceEndpoint(appState.serviceEndpoint);
+  updateServiceReqHint();
+}
+
+function applyServicesSnapshot(snap) {
+  appState.services = snap.instances || [];
+  ui.renderServiceCensus(snap);
+  renderServices();
+}
+
+/**
+ * Load the Services tab: the census the backend already holds, or a new one
+ * when none has run on this connection yet.
+ */
+async function loadServices() {
+  if (!nats.isConnected()) return;
+  try {
+    const snap = await nats.getServices();
+    if (snap.at) {
+      applyServicesSnapshot(snap);
+      return;
+    }
+  } catch (err) {
+    ui.setEmpty(els.svcList, err.message, true);
+    return;
+  }
+  await handleServicesRefresh();
+}
+
+async function handleServicesRefresh() {
+  const shown = appState.services.length > 0;
+  if (!shown) ui.setEmpty(els.svcList, "Asking every service to report in…");
+
+  els.btnSvcRefresh.disabled = true;
+  try {
+    applyServicesSnapshot(await nats.refreshServices());
+  } catch (err) {
+    // A failed census leaves the backend's untouched, so a list on screen is
+    // still the last thing that was true and stays. An empty one is replaced
+    // by the reason, which is the more useful thing to put there.
+    if (shown) ui.showToast(err.message, "error");
+    else ui.setEmpty(els.svcList, err.message, true);
+  } finally {
+    els.btnSvcRefresh.disabled = !nats.isConnected();
+  }
+}
+
+function selectService(name) {
+  appState.serviceName = name;
+  ui.highlightService(name);
+
+  const group = serviceGroup(name);
+  ui.renderServiceInstances(name, group, selectServiceInstance);
+
+  // Keep the instance when it belongs to this service. One instance leaves
+  // nothing to choose between, so it is chosen.
+  const inst = currentServiceInstance();
+  if (inst && inst.name === name) ui.highlightServiceInstance(inst.id);
+  else if (group.length === 1) selectServiceInstance(group[0].id);
+  else clearServiceInstance();
+}
+
+function selectServiceInstance(id) {
+  const inst = appState.services.find((i) => i.id === id);
+  if (!inst) return;
+  const sameService = currentServiceInstance()?.name === inst.name;
+
+  appState.serviceId = id;
+  ui.highlightServiceInstance(id);
+  ui.renderServiceDetail(inst);
+  els.svcEmptyState.hidden = true;
+  els.svcDetailView.hidden = false;
+
+  // The subject in the form belongs to one instance's endpoint, and in a
+  // fleet where each instance has its own subjects - one per device - leaving
+  // it there would send a request meant for this instance to the last one.
+  // So it follows the selection: the same endpoint here, or nothing.
+  const ep = sameService && appState.serviceEndpoint
+    ? utils.serviceEndpoints(inst).find((e) => e.name === appState.serviceEndpoint)
+    : null;
+  if (ep) {
+    selectServiceEndpoint(ep, { keepPayload: true, switchTab: false });
+    return;
+  }
+  appState.serviceEndpoint = null;
+  els.svcReqSubject.value = "";
+  ui.highlightServiceEndpoint(null);
+  ui.clearServiceReply();
+  updateServiceReqHint();
+}
+
+/**
+ * Point the request form at an endpoint. The payload comes back from the last
+ * time this endpoint of this service was sent one, unless the caller is only
+ * moving the same endpoint to another instance - then what is typed stays.
+ */
+function selectServiceEndpoint(ep, { keepPayload = false, switchTab = true } = {}) {
+  const inst = currentServiceInstance();
+  if (!inst) return;
+
+  appState.serviceEndpoint = ep.name;
+  els.svcReqSubject.value = ep.subject;
+  ui.highlightServiceEndpoint(ep.name);
+  if (!keepPayload) els.svcReqPayload.value = storage.getServicePayload(inst.name, ep.name) ?? "";
+  ui.clearServiceReply();
+  updateServiceReqHint();
+
+  if (switchTab) {
+    ui.switchSubTab("services", "request");
+    (utils.hasWildcardToken(ep.subject) ? els.svcReqSubject : els.svcReqPayload).focus();
+  }
+}
+
+/**
+ * Say who a request will actually reach.
+ *
+ * An endpoint is a subject, not an address. Instances of a service usually
+ * share it, and which of them answers depends on the queue group. The form is
+ * opened from one instance, so without this it would quietly suggest that
+ * instance is the one being asked.
+ */
+function updateServiceReqHint() {
+  const subject = els.svcReqSubject.value.trim();
+  const inst = currentServiceInstance();
+  let hint = "";
+
+  if (subject && utils.hasWildcardToken(subject)) {
+    hint = "This subject has a wildcard. Replace each * and > with a real token before sending.";
+  } else if (subject && inst) {
+    const ep = utils.serviceEndpoints(inst).find((e) => e.subject === subject);
+    const sharing = serviceGroup(inst.name).filter(
+      (i) => !i.gone && utils.serviceEndpoints(i).some((e) => e.subject === subject),
+    ).length;
+
+    if (ep && sharing > 1 && ep.queue_group) {
+      hint = `${sharing} instances serve this subject in queue group "${ep.queue_group}". ` +
+        "One of them answers, not necessarily this one.";
+    } else if (ep && sharing > 1) {
+      hint = `${sharing} instances serve this subject with no queue group. ` +
+        "All of them get the request, and the first reply is the one shown.";
+    } else if (ep && inst.gone && sharing === 0) {
+      hint = "This instance did not answer the last census, so nothing may be listening here.";
+    }
+  }
+
+  els.svcReqHint.textContent = hint;
+  els.svcReqHint.hidden = !hint;
+}
+
+async function handleServiceSend() {
+  const subject = els.svcReqSubject.value.trim();
+  if (!subject) {
+    ui.showToast("Pick an endpoint, or enter a subject", "error");
+    return;
+  }
+  if (utils.hasWildcardToken(subject)) {
+    ui.showToast("Replace the wildcards in the subject before sending", "error");
+    return;
+  }
+
+  const payload = els.svcReqPayload.value;
+  const timeout = parseInt(els.svcReqTimeout.value, 10) || DEFAULT_RPC_TIMEOUT_MS;
+  const inst = currentServiceInstance();
+  const ep = inst && utils.serviceEndpoints(inst).find((e) => e.subject === subject);
+  if (ep) storage.setServicePayload(inst.name, ep.name, payload);
+
+  els.btnSvcSend.disabled = true;
+  const started = performance.now();
+  try {
+    const reply = await nats.request(subject, payload, "", timeout);
+    ui.renderServiceReply({ reply, ms: performance.now() - started });
+  } catch (err) {
+    ui.renderServiceReply({ error: err.message, ms: performance.now() - started });
+  } finally {
+    els.btnSvcSend.disabled = !nats.isConnected();
+  }
+
+  // The endpoint's counters just moved, so read them while the change on
+  // screen is still the one this request made.
+  if (ep) refreshServiceStats({ quiet: true });
+}
+
+/** Ask the selected instance for its stats now, and fold them into the census. */
+async function refreshServiceStats({ quiet = false } = {}) {
+  const inst = currentServiceInstance();
+  if (!inst) return;
+  try {
+    const fresh = await nats.refreshServiceStats(inst.name, inst.id);
+    appState.services = appState.services.map((i) => (i.id === fresh.id ? fresh : i));
+    renderServices();
+    if (fresh.gone && !inst.gone) ui.showToast(`${fresh.name} ${fresh.id} is no longer answering`, "info");
+  } catch (err) {
+    if (!quiet) ui.showToast(err.message, "error");
+  }
+}
+
+/** Hand the request to the composer, which has headers and templates. */
+function handleServiceToComposer() {
+  els.pubSubject.value = els.svcReqSubject.value.trim();
+  els.pubPayload.value = els.svcReqPayload.value;
+  els.reqTimeout.value = els.svcReqTimeout.value;
+  if (els.composer.classList.contains("is-collapsed")) handleComposerToggle();
+  ui.switchTab("msg");
+  els.pubSubject.focus();
+}
+
+function setupServiceEventDelegation() {
+  els.svcEndpoints.addEventListener("click", (e) => {
+    const tr = e.target.closest("tr[data-index]");
+    const inst = currentServiceInstance();
+    if (!tr || !inst) return;
+    const ep = utils.serviceEndpoints(inst)[Number(tr.dataset.index)];
+    if (ep) selectServiceEndpoint(ep);
+  });
+}
+
+els.btnSvcRefresh.addEventListener("click", handleServicesRefresh);
+els.btnSvcStats.addEventListener("click", () => refreshServiceStats());
+els.btnSvcSend.addEventListener("click", handleServiceSend);
+els.btnSvcFormat.addEventListener("click", () => formatInto(els.svcReqPayload));
+els.btnSvcToComposer.addEventListener("click", handleServiceToComposer);
+els.svcFilter.addEventListener("keyup", () => ui.filterList(els.svcFilter, els.svcList));
+els.svcReqSubject.addEventListener("input", updateServiceReqHint);
+els.svcReqPayload.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") handleServiceSend();
+});

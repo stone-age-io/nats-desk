@@ -403,6 +403,67 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
 .mon-json { margin: 0; padding: var(--s3); font-size: 0.72rem; line-height: 1.5; white-space: pre; }
 
 /* --------------------------------------------------------------------------
+   SERVICES
+   Three panes, narrowing left to right: every service, the instances of one,
+   and the endpoints of one instance. The two tables borrow .mon-table.
+   -------------------------------------------------------------------------- */
+
+/* Two resizable columns, same shape as the KV tab */
+.panes-services {
+  grid-template-columns:
+    clamp(var(--min-col), var(--c0, 220px), calc(100% - var(--gutter) * 2 - var(--c1, 460px) - var(--min-flex)))
+    var(--gutter)
+    clamp(var(--min-col), var(--c1, 460px), calc(100% - var(--gutter) * 2 - var(--c0, 220px) - var(--min-flex)))
+    var(--gutter)
+    minmax(0, 1fr);
+}
+
+/* The instance table fits its pane rather than scrolling sideways: the counts
+   are what it is for, and they sat past the edge. The first column takes the
+   slack and ellipses - width:100% with max-width:0 is what lets a table cell
+   shrink below its content. */
+#svcInstances .mon-table { min-width: 0; }
+#svcInstances td.grow { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#svcInstances td.gone { color: var(--danger); text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.04em; }
+
+.svc-census { padding: var(--s2) var(--s3) 0; font-size: 0.7rem; line-height: 1.45; color: var(--muted-dim); }
+.svc-census .bad { color: var(--danger); }
+
+/* A service is a name plus a line about its instances, not a bare name */
+.svc-row { display: flex; flex-direction: column; gap: 2px; }
+.svc-name { font-weight: 600; }
+.svc-sub { font-family: var(--font); font-size: 0.7rem; font-weight: 400; color: var(--muted); }
+.svc-err { font-family: var(--font); font-size: 0.68rem; font-weight: 600; color: var(--danger); }
+
+/* h3 is uppercased; a service name is case-sensitive and must read as typed */
+.svc-label-name { text-transform: none; letter-spacing: 0; color: var(--text); }
+
+.mon-table td.subj { max-width: 260px; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
+.mon-table td.last-err { max-width: 220px; overflow: hidden; text-overflow: ellipsis; color: var(--danger); }
+.mon-table td.hot { color: var(--danger); font-weight: 600; }
+
+.svc-gone { font-size: 0.72rem; color: var(--danger); }
+.svc-desc { font-size: 0.78rem; color: var(--text); }
+.svc-meta { display: flex; flex-wrap: wrap; gap: var(--s1); margin-top: var(--s1); }
+.meta-chip {
+  font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
+  border: 1px solid var(--border-soft); border-radius: 100px; padding: 0 7px;
+}
+.meta-chip b { color: var(--text); font-weight: 600; }
+
+.svc-req-row { display: flex; align-items: center; gap: var(--s2); flex-shrink: 0; }
+.svc-req-row input { margin: 0; flex: 1; min-width: 0; }
+.svc-payload { margin: 0; min-height: 120px; flex-shrink: 0; }
+
+.svc-reply {
+  display: flex; flex-direction: column; gap: var(--s2);
+  border-top: 1px solid var(--border-soft); padding-top: var(--s2);
+}
+.svc-reply-head { display: flex; align-items: center; gap: var(--s2); font-size: 0.78rem; }
+.svc-reply-msg { color: var(--text); word-break: break-word; }
+.svc-reply .stream-msg-body pre { font-size: 0.78rem; color: #c9d1d9; }
+
+/* --------------------------------------------------------------------------
    SPLITTERS
    A splitter occupies the gutter track between two panes and writes the
    width of the pane on its left into --c{data-col} on the grid.
@@ -939,6 +1000,7 @@ button.disclosure.sm {
 .badge-sub { background: rgba(63,185,80,0.2);  color: #56d364; border: 1px solid rgba(63,185,80,0.4); }
 .badge-rpc { background: rgba(88,166,255,0.2); color: #79c0ff; border: 1px solid rgba(88,166,255,0.4); }
 .badge-hdr { background: rgba(210,153,34,0.2); color: #e3b341; border: 1px solid rgba(210,153,34,0.4); padding: 1px 5px; }
+.badge-err { background: rgba(248,81,73,0.2); color: #ff7b72; border: 1px solid rgba(248,81,73,0.4); }
 
 pre { margin: 0; color: #c9d1d9; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
 
@@ -1126,10 +1188,15 @@ dialog.app-dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blu
   .workspace { overflow: visible; height: auto; }
   .tab-panel { height: auto; }
 
+  /* Five tabs are wider than a phone, so the bar scrolls sideways instead of
+     widening the whole page. */
+  .tabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding: 0 var(--s2); }
+  .tab { flex-shrink: 0; padding: 10px 12px; }
+
   /* Stacked panes have nothing to drag between, so the splitters go away and
      the grid takes its gutter back as a plain row gap. */
   .panes,
-  .panes-msg, .panes-kv, .panes-stream, .panes-monitor {
+  .panes-msg, .panes-kv, .panes-stream, .panes-monitor, .panes-services {
     grid-template-columns: 1fr;
     gap: var(--s3);
     height: auto;
@@ -1148,6 +1215,10 @@ dialog.app-dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blu
   .log-pane .list-scroll { min-height: 340px; max-height: 60vh; }
   #consumerList, #streamMsgContainer { min-height: 260px; max-height: 60vh; }
   #monServerList, #monEvents, #monDetail, #monAccount { min-height: 240px; max-height: 60vh; }
+  #svcInstances, #svcEndpoints, #svcRaw { min-height: 240px; max-height: 60vh; }
+  .svc-req-row { flex-wrap: wrap; }
+  .svc-req-row input, .svc-req-row .composer-send { flex: 1 1 100%; }
+  .svc-req-row .composer-send button { flex: 1; }
   .log-wrap { flex: none; }
   .value-view, .value-edit { flex: none; height: 260px; }
 

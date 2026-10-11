@@ -88,6 +88,7 @@ export function initializeEventDelegation() {
 
   els.messages.addEventListener("click", onCopyClick);
   els.streamMsgContainer.addEventListener("click", onCopyClick);
+  els.svcReply.addEventListener("click", onCopyClick);
 }
 
 // ============================================================================
@@ -560,6 +561,334 @@ export function appendStreamTailMessage(m) {
 
 export function showTailPlaceholder() {
   setEmpty(els.streamMsgContainer, "Tailing… waiting for new messages");
+}
+
+// ============================================================================
+// SERVICES
+// ============================================================================
+
+/** The census line under the Services head: when, how many, and what is missing. */
+export function renderServiceCensus(snap) {
+  const el = els.svcCensus;
+  if (!snap || !snap.at) {
+    el.hidden = true;
+    return;
+  }
+
+  const live = snap.instances.filter((i) => !i.gone).length;
+  const line = document.createElement("div");
+  line.textContent =
+    `${new Date(snap.at).toLocaleTimeString()} · ${live.toLocaleString()} instance${live === 1 ? "" : "s"}`;
+  const lines = [line];
+
+  // Anything the census could not show is said, never silently left out.
+  const warn = (text) => {
+    const d = document.createElement("div");
+    d.className = "bad";
+    d.textContent = text;
+    lines.push(d);
+  };
+  if (snap.truncated) warn(`${snap.truncated.toLocaleString()} more answered than are shown`);
+  if (snap.skipped) {
+    warn(`${snap.skipped} repl${snap.skipped === 1 ? "y was" : "ies were"} not from a micro service`);
+  }
+  if (snap.stats_error) warn(`No stats: ${snap.stats_error}`);
+
+  el.replaceChildren(...lines);
+  el.hidden = false;
+}
+
+export function renderServiceList(groups, onSelect) {
+  els.svcCount.textContent = `(${groups.length})`;
+  if (groups.length === 0) {
+    setEmpty(els.svcList, "No services are running in this account");
+    return;
+  }
+
+  els.svcList.replaceChildren();
+  for (const g of groups) {
+    const row = document.createElement("div");
+    row.className = "list-row svc-row";
+    row.dataset.name = g.name;
+    row.title = g.name;
+
+    const name = document.createElement("span");
+    name.className = "svc-name";
+    name.textContent = g.name;
+
+    const parts = [`${g.live} instance${g.live === 1 ? "" : "s"}`];
+    if (g.versions.size === 1) parts.push([...g.versions][0]);
+    else if (g.versions.size > 1) parts.push(`${g.versions.size} versions`);
+    if (g.gone) parts.push(`${g.gone} gone`);
+    const sub = document.createElement("span");
+    sub.className = "svc-sub";
+    sub.textContent = parts.join(" · ");
+
+    row.append(name, sub);
+
+    if (g.errors) {
+      const err = document.createElement("span");
+      err.className = "svc-err";
+      err.textContent = `${g.errors.toLocaleString()} error${g.errors === 1 ? "" : "s"}`;
+      err.title = "Errors since each instance started, summed over its endpoints";
+      row.append(err);
+    }
+
+    row.addEventListener("click", () => onSelect(g.name));
+    els.svcList.append(row);
+  }
+}
+
+export function highlightService(name) {
+  activateRow(els.svcList, name ? els.svcList.querySelector(`[data-name="${CSS.escape(name)}"]`) : null);
+}
+
+/**
+ * The running copies of one service. Requests and errors are blank, not 0,
+ * for an instance that did not answer STATS.
+ */
+export function renderServiceInstances(name, instances, onSelect) {
+  els.svcInstancesLabel.replaceChildren("Instances");
+  if (!name) {
+    setEmpty(els.svcInstances, "Select a service");
+    return;
+  }
+
+  // The h3 is uppercased, and a service name is case-sensitive - so the
+  // name opts out of the transform rather than being shown as something
+  // it is not.
+  const label = document.createElement("span");
+  label.className = "svc-label-name";
+  label.textContent = name;
+  const count = document.createElement("span");
+  count.className = "accent";
+  count.textContent = `(${instances.length})`;
+  els.svcInstancesLabel.replaceChildren("Instances of ", label, " ", count);
+
+  // An instance is named by its metadata when it has any - a host, a site, a
+  // device code is what an operator knows it by - and by its ID otherwise.
+  // The ID is random per process, so it is in the tooltip and the detail
+  // header rather than spending the narrow pane's width on 22 characters.
+  const now = Date.now();
+  const table = document.createElement("table");
+  table.className = "mon-table";
+  table.innerHTML =
+    "<thead><tr>" +
+    ["Instance", "Version", "Up", "Reqs", "Errors"]
+      .map((h, i) => `<th${i >= 2 ? ' class="num"' : ""}>${h}</th>`)
+      .join("") +
+    "</tr></thead>";
+
+  const body = document.createElement("tbody");
+  for (const inst of instances) {
+    const t = utils.serviceTotals(inst);
+    const started = inst.stats && inst.stats.started;
+    const meta = utils.metadataText(inst.metadata);
+    const label = meta || inst.id;
+    const tip = meta ? `${inst.id}\n${meta}` : inst.id;
+    const noStats = t ? "" : ' title="This instance did not answer STATS"';
+
+    // A gone instance's uptime is its last report, not a fact about now, so
+    // the column says what is true instead.
+    const up = inst.gone
+      ? '<td class="num gone">gone</td>'
+      : `<td class="num"${started ? ` title="${utils.escapeHtml(new Date(started).toLocaleString())}"` : ""}>` +
+        `${started ? utils.formatAge(now - Date.parse(started)) : "-"}</td>`;
+
+    const tr = document.createElement("tr");
+    tr.dataset.id = inst.id;
+    if (inst.gone) tr.classList.add("stale");
+    tr.innerHTML =
+      `<td class="grow" title="${utils.escapeHtml(tip)}">${utils.escapeHtml(label)}</td>` +
+      `<td>${utils.escapeHtml(inst.version)}</td>` +
+      up +
+      `<td class="num"${noStats}>${t ? t.requests.toLocaleString() : "-"}</td>` +
+      `<td class="num${t && t.errors ? " hot" : ""}"${noStats}>${t ? t.errors.toLocaleString() : "-"}</td>`;
+    tr.addEventListener("click", () => onSelect(inst.id));
+    body.append(tr);
+  }
+  table.append(body);
+  els.svcInstances.replaceChildren(table);
+}
+
+export function highlightServiceInstance(id) {
+  els.svcInstances.querySelectorAll("tr[data-id]").forEach((tr) => {
+    tr.classList.toggle("active", tr.dataset.id === id);
+  });
+}
+
+/** Everything about one instance except the request form, which is the user's. */
+export function renderServiceDetail(inst) {
+  els.svcTitle.textContent = inst.name;
+
+  const started = inst.stats && inst.stats.started;
+  const bits = [inst.version, inst.id];
+  if (started) bits.push(`up ${utils.formatAge(Date.now() - Date.parse(started))}`);
+  els.svcSubtitle.textContent = bits.join(" · ");
+  els.svcSubtitle.title = started ? `Started ${new Date(started).toLocaleString()}` : "";
+
+  els.svcGone.hidden = !inst.gone;
+
+  const desc = inst.info && inst.info.description;
+  els.svcDescription.textContent = desc || "";
+  els.svcDescription.hidden = !desc;
+
+  const keys = Object.keys(inst.metadata || {}).sort();
+  els.svcMeta.replaceChildren(
+    ...keys.map((k) => {
+      const chip = document.createElement("span");
+      chip.className = "meta-chip";
+      const key = document.createElement("span");
+      key.textContent = `${k}=`;
+      const val = document.createElement("b");
+      val.textContent = inst.metadata[k];
+      chip.append(key, val);
+      return chip;
+    }),
+  );
+  els.svcMeta.hidden = keys.length === 0;
+
+  renderServiceEndpoints(inst);
+  renderJsonInto(els.svcRaw, { info: inst.info, stats: inst.stats ?? null });
+}
+
+/**
+ * Endpoints with their stats. Rows carry their index into the instance's
+ * endpoint list; main.js handles the click, the way it does for consumers.
+ */
+function renderServiceEndpoints(inst) {
+  const eps = utils.serviceEndpoints(inst);
+  els.svcEndpointCount.textContent = eps.length;
+
+  if (eps.length === 0) {
+    setEmpty(els.svcEndpoints, "This instance has no endpoints");
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "mon-table";
+  table.innerHTML =
+    "<thead><tr>" +
+    ["Endpoint", "Subject", "Queue", "Reqs", "Errors", "Avg", "Last error"]
+      .map((h, i) => `<th${i >= 3 && i <= 5 ? ' class="num"' : ""}>${h}</th>`)
+      .join("") +
+    "</tr></thead>";
+
+  const body = document.createElement("tbody");
+  eps.forEach((ep, i) => {
+    const s = utils.endpointStats(inst, ep);
+    const meta = utils.metadataText(ep.metadata);
+
+    const tr = document.createElement("tr");
+    tr.dataset.index = i;
+    tr.dataset.name = ep.name;
+    tr.title = "Click to send this endpoint a request";
+    tr.innerHTML =
+      `<td class="name"${meta ? ` title="${utils.escapeHtml(meta)}"` : ""}>${utils.escapeHtml(ep.name)}</td>` +
+      `<td class="subj" title="${utils.escapeHtml(ep.subject)}">${utils.escapeHtml(ep.subject)}</td>` +
+      `<td>${utils.escapeHtml(ep.queue_group || "-")}</td>` +
+      `<td class="num">${s ? s.num_requests.toLocaleString() : "-"}</td>` +
+      `<td class="num${s && s.num_errors ? " hot" : ""}">${s ? s.num_errors.toLocaleString() : "-"}</td>` +
+      // micro reports an average of 0 before the first request, which would
+      // read as "instant" for an endpoint nobody has called.
+      `<td class="num">${s && s.num_requests ? utils.formatDuration(s.average_processing_time) : "-"}</td>` +
+      `<td class="last-err" title="${utils.escapeHtml((s && s.last_error) || "")}">` +
+      `${utils.escapeHtml((s && s.last_error) || "")}</td>`;
+    body.append(tr);
+  });
+  table.append(body);
+  els.svcEndpoints.replaceChildren(table);
+}
+
+export function highlightServiceEndpoint(name) {
+  els.svcEndpoints.querySelectorAll("tr[data-name]").forEach((tr) => {
+    tr.classList.toggle("active", tr.dataset.name === name);
+  });
+}
+
+/**
+ * Show the outcome of a request to an endpoint.
+ *
+ * A micro service reports failure in two headers rather than in the body, so
+ * an error reply is still a reply - it arrived, it has a body - and it is
+ * labelled from those headers instead of looking like a success with an odd
+ * payload. A request that got no reply at all is a different thing again.
+ */
+export function renderServiceReply({ reply, error, ms }) {
+  const head = document.createElement("div");
+  head.className = "svc-reply-head";
+
+  const badge = document.createElement("span");
+  const msg = document.createElement("span");
+  msg.className = "svc-reply-msg";
+  const time = document.createElement("span");
+  time.className = "muted-xs push-right";
+  time.textContent = `${Math.round(ms)} ms`;
+  time.title = "Round trip, including the hop to this app's backend";
+
+  if (error) {
+    badge.className = "badge badge-err";
+    badge.textContent = "No reply";
+    msg.textContent = error;
+    head.append(badge, msg, time);
+    els.svcReply.replaceChildren(head);
+    return;
+  }
+
+  const code = utils.headerValue(reply.headers, "Nats-Service-Error-Code");
+  const desc = utils.headerValue(reply.headers, "Nats-Service-Error");
+  if (code || desc) {
+    badge.className = "badge badge-err";
+    badge.textContent = code ? `Error ${code}` : "Error";
+    msg.textContent = desc || "";
+  } else {
+    badge.className = "badge badge-sub";
+    badge.textContent = "OK";
+  }
+  head.append(badge, msg, time);
+
+  const parts = [head];
+  if (reply.headers) {
+    const hdr = buildHeaderBlock(Object.entries(reply.headers));
+    if (hdr) parts.push(hdr);
+  }
+
+  const data = reply.data || "";
+  if (!data) {
+    const none = document.createElement("div");
+    none.className = "empty";
+    none.textContent = "Empty body";
+    parts.push(none);
+  } else {
+    // One reply on screen at a time, so one fixed id serves the copy button
+    const msgId = "svcReplyBody";
+    const body = document.createElement("div");
+    body.className = "stream-msg-body";
+    const copy = document.createElement("button");
+    copy.className = "copy-btn";
+    copy.dataset.msgId = msgId;
+    copy.textContent = "Copy";
+    const pre = document.createElement("pre");
+    pre.id = msgId;
+    if (data.length < MAX_PRETTY_SIZE) {
+      try {
+        pre.innerHTML = utils.syntaxHighlight(JSON.parse(data));
+      } catch {
+        pre.textContent = data;
+      }
+    } else {
+      pre.textContent = data.substring(0, MAX_PRETTY_SIZE) +
+        `\n... [Truncated ${utils.formatBytes(data.length)}]`;
+    }
+    body.append(copy, pre);
+    parts.push(body);
+  }
+
+  els.svcReply.replaceChildren(...parts);
+}
+
+export function clearServiceReply() {
+  setEmpty(els.svcReply, "The reply appears here");
 }
 
 // ============================================================================
