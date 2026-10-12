@@ -2,9 +2,15 @@
 //
 // The embed lives here rather than in cmd/ or internal/ because //go:embed
 // cannot reach into a parent directory - the directive has to sit beside the
-// files it takes. dist/.gitkeep is committed so a fresh clone builds before
-// anyone has run `npm run build`; the `all:` prefix is what makes a dot-file
-// count, and without it the pattern matches nothing and the build fails.
+// files it takes.
+//
+// dist is committed, already built. `go install ...@latest` compiles the
+// module as published, which means the committed files and nothing else, and
+// it cannot run npm. While dist was ignored, that embedded an empty directory,
+// and the app window showed a file listing instead of the app. `make ui`
+// rebuilds dist, and TestDistIsCurrent fails when the sources have changed
+// without it. The `all:` prefix keeps names that begin with `.` or `_`, which
+// the default pattern drops and a bundler is free to emit.
 package frontend
 
 import (

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>nats-desk is not running</title>
+  <!--
+    Everything is inline. This page is served out of the service worker cache
+    at the one moment nothing can be fetched, so a linked stylesheet would be
+    a blank page and a linked script would be a dead button.
+  -->
+  <style>
+    :root {
+      --bg: #0a0a0a; --panel: #1c2128; --border: #30363d;
+      --text: #e0e0e0; --muted: #8b949e; --muted-dim: #6e7681;
+      --accent: #58a6ff; --primary: #3fb950; --primary-hover: #2ea043;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg); color: var(--text);
+      font-family: var(--font); padding: 24px;
+    }
+    .card {
+      width: 100%; max-width: 420px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 28px; text-align: center;
+    }
+    .mark { width: 44px; height: 44px; color: #4f46e5; margin-bottom: 16px; }
+    h1 { font-size: 1.05rem; margin: 0 0 8px; }
+    p { font-size: 0.82rem; color: var(--muted); line-height: 1.55; margin: 0 0 20px; }
+    button {
+      width: 100%; padding: 10px 16px;
+      background: var(--primary); color: #04260d;
+      border: none; border-radius: 6px;
+      font-family: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: var(--primary-hover); }
+    button:disabled { opacity: 0.55; cursor: default; }
+    .status { font-size: 0.75rem; color: var(--muted-dim); margin-top: 14px; min-height: 1.2em; }
+    .alt { font-size: 0.72rem; color: var(--muted-dim); margin-top: 20px; padding-top: 16px; border-top: 1px solid #21262d; }
+    .alt a { color: var(--accent); text-decoration: none; }
+    .alt a:hover { text-decoration: underline; }
+    code { font-family: var(--mono); font-size: 0.95em; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <svg class="mark" viewBox="0 0 256 256" fill="currentColor" role="img" aria-label="nats-desk">
+      <path d="M128,0 C57.343,0 0,57.343 0,128 C0,198.657 57.343,256 128,256 C198.657,256 256,198.657 256,128 C256,57.343 198.657,0 128,0 z M128,28 C181.423,28 224.757,71.334 224.757,124.757 C224.757,139.486 221.04,153.32 214.356,165.42 C198.756,148.231 178.567,138.124 162.876,124.331 C155.723,124.214 128.543,124.043 113.254,124.043 C113.254,147.334 113.254,172.064 113.254,190.513 C100.456,179.347 94.543,156.243 94.543,156.243 C83.432,147.065 31.243,124.757 31.243,124.757 C31.243,71.334 74.577,28 128,28 z"/>
+    </svg>
+
+    <h1>nats-desk is not running</h1>
+    <p>
+      This window is the app; the NATS connections live in a local process that
+      has to be running behind it. Start it and this page will reload itself.
+    </p>
+
+    <button id="start" type="button">Start nats-desk</button>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+
+    <div class="alt">
+      Nothing happened? Try <a id="open" href="natsdesk://open">opening a fresh window</a>,
+      or launch <code>nats-desk</code> yourself.
+    </div>
+  </div>
+
+  <script>
+    // Two things happen here, and only one of them needs a button.
+    //
+    // The poll runs from the moment the page loads, so a backend started any
+    // other way - the binary double-clicked, a sign-in autostart finishing
+    // late - recovers this window without anyone touching it. The button is
+    // for the case where nothing else is going to happen: a natsdesk:// URL
+    // is the only way a page can ask an operating system to start a program.
+    const POLL_MS = 2000;
+
+    const btn = document.getElementById("start");
+    const status = document.getElementById("status");
+
+    // manifest.json rather than an API endpoint: it needs no session, and the
+    // service worker leaves non-navigation requests strictly alone, so this
+    // is a real trip to the port every time.
+    async function isUp() {
+      try {
+        const res = await fetch("/manifest.json", { cache: "no-store" });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    }
+
+    async function poll() {
+      // Only while someone is looking. An abandoned tab should not sit there
+      // hitting a port forever.
+      if (document.visibilityState === "visible" && (await isUp())) {
+        status.textContent = "Connected. Reloading\u2026";
+        location.replace("/");
+        return;
+      }
+      setTimeout(poll, POLL_MS);
+    }
+
+    btn.addEventListener("click", () => {
+      btn.disabled = true;
+      status.textContent = "Starting\u2026 your browser may ask permission first.";
+      window.location.href = "natsdesk://start";
+      // Re-enable rather than leaving a dead button: on macOS, and anywhere
+      // the scheme was never registered, that navigation does nothing at all.
+      setTimeout(() => {
+        btn.disabled = false;
+      }, 8000);
+    });
+
+    poll();
+  </script>
+</body>
+</html>

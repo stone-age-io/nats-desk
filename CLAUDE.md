@@ -47,6 +47,11 @@ make build-all VERSION=1.0.0
 # Frontend iteration with HMR: run this, then `npm run dev` in frontend/
 make dev
 
+# Rebuild frontend/dist after any frontend change, and commit it with the
+# change. Without make: `npm run build` in frontend/, then
+# `go test ./frontend -run TestDistIsCurrent -update`
+make ui
+
 # Tests. make test has no -race on purpose (see Testing below)
 make test
 make test-race       # needs cgo + a C compiler
@@ -70,6 +75,7 @@ nats-desk/
 ├── cmd/nats-desk/main.go       # flags, single-instance, browser open, wiring
 ├── frontend/
 │   ├── embed.go                # //go:embed all:dist  (must live beside dist)
+│   ├── dist/                   # the built app - committed, see below
 │   ├── api.js                  # replaces the old nats-client.js
 │   ├── main.js ui.js dom.js dialogs.js splitters.js utils.js storage.js
 │   ├── index.html style.css
@@ -264,6 +270,36 @@ entire version string block unless `FileVersion` **and** `ProductVersion`
 appear in `StringFileInfo` as strings - the numeric `FixedFileInfo` values are
 not enough, and without them the properties dialog shows nothing at all while
 the icon still works, which makes it look like the resource did not build.
+
+**The built frontend is committed too, for the same reason.** `go install
+...@latest` compiles the module as published - the committed files and nothing
+else - and cannot run npm. While `frontend/dist` was ignored, that embedded a
+directory holding only `.gitkeep`, and the app window showed a bare file
+listing of it; the README had been recommending that install since phase 1.
+Committing `dist` makes `go install` work and lets a fresh clone build with Go
+alone. Three things keep it honest:
+
+- `TestDistIsCurrent` in `frontend/` hashes the sources and compares them with
+  `dist/.source-sha256`, which `make ui` writes after each build. A frontend
+  change committed without its rebuilt `dist` fails `make test`. Line endings
+  are normalised before hashing, because this checkout has CRLF and Linux has
+  LF. `package-lock.json` is left out, because npm rewrites it with no change
+  in the output.
+- `.gitattributes` marks `dist` `-diff linguist-generated`, so minified output
+  stays out of `git diff` and is collapsed in pull requests.
+- `make clean` no longer deletes `dist/assets`: that is committed content now,
+  and an index pointing at missing assets is a broken app.
+
+A build must come out byte-identical whichever OS ran it, or `dist` churns with
+every change of machine. The bundles already do: they contain no CR even from
+a CRLF checkout, so their hashed names match. `index.html` did not. Vite
+strips the dev-time `<link>` and `<script>` tags with their LF but not their
+CR, and those stray CRs make git classify the file as binary, so autocrlf
+leaves it alone and it is committed with whatever endings the build produced.
+A `transformIndexHtml` hook in `vite.config.js` drops every CR. It drops them
+rather than turning a stray one into a newline, because that would add blank
+lines an LF checkout's build does not have. Verified by building from all-LF
+and all-CRLF copies of the sources and comparing the output byte for byte.
 
 **The port is fixed (4111) and must stay fixed.** An installed PWA's identity -
 and therefore its stored preferences - is its origin, and the origin includes
@@ -583,9 +619,11 @@ silently wrong: the subject filter rules, the KV operation mapping, the
 batching/drop accounting, the context editor's round-trip fidelity, the
 monitoring rate arithmetic, the `natsdesk://` argument parsing, the token
 file's accept/reject rules, and the idle countdown quit-on-close relies on -
-that a reload survives it and turning it off cancels one already running. The
-HTTP and NATS layers are covered by driving the real UI against a real server,
-not by unit tests.
+that a reload survives it and turning it off cancels one already running.
+`TestDistIsCurrent` is not a logic test but a guard on the repository: it is
+what fails when `frontend/dist` falls behind its sources. The HTTP and NATS
+layers are covered by driving the real UI against a real server, not by unit
+tests.
 
 `internal/services` is the exception: its tests start a real `nats-server` in
 the test process (loopback, random port) and register real micro services.

@@ -26,15 +26,25 @@ cannot do: mutual TLS and custom CAs, importing your `nats` CLI contexts, the
 
 ## Install
 
-Download a binary from the releases page, or:
+With Go installed:
 
 ```bash
 go install github.com/stone-age-io/nats-desk/cmd/nats-desk@latest
 ```
 
-Installing this way means no Gatekeeper or SmartScreen prompt — those are
-triggered by the quarantine mark that browser downloads apply, and `go install`,
-`brew`, `scoop` and `curl` do not set it.
+On Windows, add `-ldflags=-H=windowsgui`. It builds a windowed program;
+without it a console window flashes up every time the app starts:
+
+```bash
+go install -ldflags=-H=windowsgui github.com/stone-age-io/nats-desk/cmd/nats-desk@latest
+```
+
+The built UI is part of the repository, so this needs Go and nothing else. It
+also means no Gatekeeper or SmartScreen prompt: those fire on the mark a
+browser puts on files it downloads, and a binary built on your own machine
+never carries one. Binaries from the releases page are not code-signed, so one
+downloaded *with a browser* does get that prompt; fetching it with `curl` does
+not.
 
 ## Use
 
@@ -166,7 +176,8 @@ it like a password.
 
 ## Building
 
-Requires Go 1.25+ and Node 18+.
+Requires Go 1.25+, plus Node 18+ for the `make` targets that rebuild the
+frontend.
 
 ```bash
 make build        # frontend + binary for this platform
@@ -174,14 +185,21 @@ make build-all    # every supported target, from this one machine
 make test
 ```
 
-On Windows without `make`, build the frontend and then link with
-`-H=windowsgui` yourself. A plain `go build` produces a console program, which
-flashes a terminal window open on every launch:
+The built frontend in `frontend/dist` is committed, because that is what
+`go install` builds from. After changing anything in `frontend/`, run
+`make ui` and commit `frontend/dist` with the change. `make test` fails if you
+forget.
+
+On Windows without `make`, link with `-H=windowsgui` yourself. A plain
+`go build` produces a console program, which flashes a terminal window open on
+every launch:
 
 ```bash
-cd frontend && npm install && npm run build && touch dist/.gitkeep && cd ..
 go build -trimpath -ldflags "-s -w -H=windowsgui" -o nats-desk.exe ./cmd/nats-desk
 ```
+
+Without `make`, `make ui` is `npm run build` in `frontend/` followed by
+`go test ./frontend -run TestDistIsCurrent -update`.
 
 `CGO_ENABLED=0` throughout, so a single machine cross-compiles Linux
 (amd64/arm64), macOS (amd64/arm64), Windows (amd64/arm64) and FreeBSD without a

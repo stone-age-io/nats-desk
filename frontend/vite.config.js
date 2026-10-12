@@ -17,4 +17,21 @@ export default defineConfig({
     // Fail loudly rather than silently shipping a half-built app to go:embed.
     emptyOutDir: true,
   },
+  plugins: [
+    {
+      // dist is committed, so a build must come out the same on every OS. On
+      // Windows git checks index.html out with CRLF, and when Vite strips the
+      // dev-time <link> and <script> tags it takes their LF but leaves their
+      // CR. Those stray CRs are enough for git to classify the result as
+      // binary and commit it byte for byte, so it would change with whichever
+      // machine built it last. Dropping every CR - not turning a stray one
+      // into a line break - is what makes the output match an LF checkout's
+      // exactly. The bundles are LF already.
+      name: "lf-index-html",
+      transformIndexHtml: {
+        order: "post",
+        handler: (html) => html.replaceAll("\r", ""),
+      },
+    },
+  ],
 });

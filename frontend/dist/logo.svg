@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="#4f46e5" role="img" aria-label="Stone Age">
+  <!--
+    Stone-Age.io platform mark, copied from helpdesk ui/src/components/BrandLogo.vue.
+    The inner subpath winds against the outer circle, so the nonzero fill rule
+    knocks the interior out. That hole stays transparent so the mark sits on any
+    background - the opaque white in icon-192/512.png is specific to the PWA
+    launcher icons, which cannot rely on the surface behind them.
+  -->
+  <path d="M128,0 C57.343,0 0,57.343 0,128 C0,198.657 57.343,256 128,256 C198.657,256 256,198.657 256,128 C256,57.343 198.657,0 128,0 z M128,28 C181.423,28 224.757,71.334 224.757,124.757 C224.757,139.486 221.04,153.32 214.356,165.42 C198.756,148.231 178.567,138.124 162.876,124.331 C155.723,124.214 128.543,124.043 113.254,124.043 C113.254,147.334 113.254,172.064 113.254,190.513 C100.456,179.347 94.543,156.243 94.543,156.243 C83.432,147.065 31.243,124.757 31.243,124.757 C31.243,71.334 74.577,28 128,28 z"/>
+</svg>

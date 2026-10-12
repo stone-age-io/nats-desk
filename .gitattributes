@@ -1,0 +1,4 @@
+# The built frontend is committed (see frontend/embed.go), but it is minified
+# output that nobody reviews line by line. Keep it out of diffs, and mark it
+# generated so pull requests collapse it.
+frontend/dist/** -diff linguist-generated

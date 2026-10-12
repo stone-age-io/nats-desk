@@ -35,13 +35,14 @@ all: build
 
 ## ui: build the single-page app into frontend/dist for //go:embed
 ##
-## The .gitkeep restore is not decoration: vite's emptyOutDir wipes dist on
-## every build, and that placeholder is what makes //go:embed all:dist resolve
-## on a fresh clone that has not run this target yet. Without it, cloning and
-## running `go build` fails before you get anywhere near npm.
+## dist is committed, because `go install` builds from committed files only
+## and cannot run npm. Run this after any frontend change, and commit dist with
+## the change. The second line records which sources this build came from;
+## `make test` compares that with the sources as they are now, which is what
+## catches a frontend change committed without its rebuilt dist.
 ui:
 	cd $(FRONTEND) && npm install --silent && npm run build
-	@touch $(FRONTEND)/dist/.gitkeep
+	go test ./$(FRONTEND) -run TestDistIsCurrent -update
 
 ## build: frontend + binary for the current platform
 build: ui
@@ -122,7 +123,7 @@ deps:
 	go mod tidy
 
 clean:
-	rm -rf $(DIST) $(FRONTEND)/dist/assets coverage.out coverage.html
+	rm -rf $(DIST) coverage.out coverage.html
 	rm -f $(BINARY) $(BINARY).exe
 
 install-tools:
