@@ -165,6 +165,19 @@ function connectWs() {
   return wsReady;
 }
 
+/**
+ * Open the push channel at load rather than on first use.
+ *
+ * The backend counts open sockets to tell whether any window is still showing
+ * the app, and that count is what quit-on-close and --idle-timeout act on. A
+ * window that never connected to NATS would otherwise never be counted, and
+ * closing it could never stop the process. A failure here is not reported:
+ * whatever needs the channel next will try again and say so.
+ */
+export function openPushChannel() {
+  connectWs().catch(() => {});
+}
+
 function dispatch(frame) {
   switch (frame.type) {
     case "batch":
@@ -643,8 +656,8 @@ export async function getServiceStats(name, id) {
 // ============================================================================
 // DESKTOP
 // ============================================================================
-// The local process itself: what version it is, where it lives, and whether
-// it starts at sign-in. The only endpoints here that have nothing to do with
+// The local process itself: what version it is, where it lives, whether it
+// starts at sign-in, and whether it stops once its last window is closed. The only endpoints here that have nothing to do with
 // NATS, and the only ones that still answer usefully with no server anywhere.
 
 export async function getDesktop() {
@@ -653,4 +666,8 @@ export async function getDesktop() {
 
 export async function setAutostart(enabled) {
   return put("/api/desktop/autostart", { enabled });
+}
+
+export async function setQuitOnClose(enabled) {
+  return put("/api/desktop/quit-on-close", { enabled });
 }

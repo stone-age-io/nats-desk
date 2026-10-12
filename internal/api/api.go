@@ -27,6 +27,10 @@ type API struct {
 	mgr *natsconn.Manager
 	mon *monitor.Monitor
 	log *slog.Logger
+
+	// OnQuitOnClose is told when the quit-on-close setting changes, so the
+	// running process honours it at once rather than from its next start.
+	OnQuitOnClose func(bool)
 }
 
 func New(mgr *natsconn.Manager, mon *monitor.Monitor, log *slog.Logger) *API {

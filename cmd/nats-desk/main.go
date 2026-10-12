@@ -24,8 +24,15 @@ import (
 	"github.com/stone-age-io/nats-desk/internal/natsconn"
 	"github.com/stone-age-io/nats-desk/internal/scheme"
 	"github.com/stone-age-io/nats-desk/internal/server"
+	"github.com/stone-age-io/nats-desk/internal/settings"
 	"github.com/stone-age-io/nats-desk/internal/ws"
 )
+
+// closeGrace is how long quit-on-close waits after the last window goes. Long
+// enough that a reload, which drops the push channel and opens a new one, is
+// not mistaken for closing the window; short enough that the process is gone
+// by the time anyone goes looking for it.
+const closeGrace = 5 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -52,7 +59,14 @@ func run() error {
 		return nil
 	}
 
+	// Before the logger: leaving the console invalidates the standard handles,
+	// and applog has to see that to choose its file.
+	detached := detachConsole()
 	log := applog.Setup(*verbose)
+	if detached {
+		log.Info("console build started outside a terminal, so its console window was closed; " +
+			"link with -H=windowsgui to stop it appearing at all")
+	}
 
 	// A natsdesk:// argument means a browser sent us, not a person at a
 	// prompt: the installed app found nothing listening and used the URL
@@ -82,13 +96,32 @@ func run() error {
 		tokenPath = server.TokenPath()
 	}
 
+	// The flag, when given, is an explicit choice for this run and wins.
+	// Otherwise the quit-on-close setting decides: a short grace after the
+	// last window goes, or never. -dev ignores the setting, because closing
+	// the Vite tab is not asking for the backend under it to go.
+	idleFor := func(quitOnClose bool) time.Duration {
+		switch {
+		case *idleTimeout > 0:
+			return *idleTimeout
+		case quitOnClose && !*dev:
+			return closeGrace
+		}
+		return 0
+	}
+	settingsPath := settings.Path()
+	prefs, err := settings.Load(settingsPath)
+	if err != nil {
+		log.Warn("could not read settings; using the defaults", "path", settingsPath, "err", err)
+	}
+
 	srv, err := server.New(server.Options{
 		Port:        *port,
 		Assets:      assets,
 		Logger:      log,
 		Dev:         *dev,
 		DevOrigin:   *devOrigin,
-		IdleTimeout: *idleTimeout,
+		IdleTimeout: idleFor(prefs.QuitOnClose),
 		TokenPath:   tokenPath,
 	})
 	if err != nil {
@@ -134,7 +167,9 @@ func run() error {
 	defer mon.Close()
 
 	srv.Mount("/ws", hub)
-	api.New(mgr, mon, log).Register(srv)
+	a := api.New(mgr, mon, log)
+	a.OnQuitOnClose = func(on bool) { srv.SetIdleTimeout(idleFor(on)) }
+	a.Register(srv)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

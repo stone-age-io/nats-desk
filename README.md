@@ -48,6 +48,12 @@ nats-desk --idle-timeout 5m  # exit 5 minutes after the last tab closes
 Running it twice does not start a second copy — the second invocation notices
 the first and just opens a browser at it.
 
+By default the process keeps running after you close its window, so the next
+one opens instantly. To have closing the window stop it instead, turn on
+**Quit nats-desk when its window closes** in the ⚙ settings panel. It waits a
+few seconds after the last window goes, so a reload does not count.
+`--idle-timeout`, when given, overrides this for that run.
+
 ### Install it as an app
 
 In Chrome or Edge, use **Install** from the address bar or the ⋮ menu. You get a
@@ -166,6 +172,15 @@ Requires Go 1.25+ and Node 18+.
 make build        # frontend + binary for this platform
 make build-all    # every supported target, from this one machine
 make test
+```
+
+On Windows without `make`, build the frontend and then link with
+`-H=windowsgui` yourself. A plain `go build` produces a console program, which
+flashes a terminal window open on every launch:
+
+```bash
+cd frontend && npm install && npm run build && touch dist/.gitkeep && cd ..
+go build -trimpath -ldflags "-s -w -H=windowsgui" -o nats-desk.exe ./cmd/nats-desk
 ```
 
 `CGO_ENABLED=0` throughout, so a single machine cross-compiles Linux

@@ -125,6 +125,9 @@ function setupDropReporting() {
 }
 
 function initializeApp() {
+  // First, so the backend counts this window as open from the moment it is.
+  nats.openPushChannel();
+
   ui.initializeEventDelegation();
   ui.initializeLogScrollTracking();
   setupTabNavigation();
@@ -326,6 +329,7 @@ function registerServiceWorker() {
 
 function setupSettings() {
   els.setAutostart.addEventListener("change", handleAutostartToggle);
+  els.setQuitOnClose.addEventListener("change", handleQuitOnCloseToggle);
   loadDesktopSettings();
 }
 
@@ -358,6 +362,8 @@ async function loadDesktopSettings() {
   setAutostartHint(
     appState.autostartSupported ? info.autostartError : "Not available on this platform",
   );
+
+  els.setQuitOnClose.checked = !!info.quitOnClose;
 }
 
 function setAutostartHint(msg) {
@@ -383,6 +389,25 @@ async function handleAutostartToggle() {
     ui.showToast(err.message, "error");
   } finally {
     els.setAutostart.disabled = !appState.autostartSupported;
+  }
+}
+
+async function handleQuitOnCloseToggle() {
+  const wanted = els.setQuitOnClose.checked;
+  els.setQuitOnClose.disabled = true;
+  try {
+    await nats.setQuitOnClose(wanted);
+    ui.showToast(
+      wanted ? "nats-desk will quit when its last window closes" : "nats-desk will keep running in the background",
+      "success",
+    );
+  } catch (err) {
+    // As for autostart: the checkbox reports the stored setting, and a write
+    // that failed did not change it.
+    els.setQuitOnClose.checked = !wanted;
+    ui.showToast(err.message, "error");
+  } finally {
+    els.setQuitOnClose.disabled = false;
   }
 }
 

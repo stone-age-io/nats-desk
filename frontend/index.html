@@ -92,6 +92,18 @@
 
     <div id="setAutostartHint" class="creds-hint" hidden></div>
 
+    <label class="check-row">
+      <input type="checkbox" id="setQuitOnClose" />
+      <span>
+        Quit nats-desk when its window closes
+        <span class="muted-xs block-hint">
+          Stops the local process a few seconds after the last nats-desk window
+          or tab is closed. Off, it keeps running in the background so the next
+          window opens straight away.
+        </span>
+      </span>
+    </label>
+
     <div class="field-group">
       <label>Paths</label>
       <div class="path-row"><span>Program</span><code id="setExe">-</code></div>

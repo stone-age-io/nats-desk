@@ -168,6 +168,21 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // main selects on it to exit when the last browser tab goes away.
 func (s *Server) Idle() <-chan struct{} { return s.idle }
 
+// SetIdleTimeout changes the idle timeout while running, which is what lets
+// the quit-on-close setting take effect without a restart. The new value
+// applies from the next time the last client disconnects. Turning it off also
+// cancels a countdown already under way, so one started under the old value
+// cannot shut the process down after the user said not to.
+func (s *Server) SetIdleTimeout(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opts.IdleTimeout = d
+	if d <= 0 && s.idleTimer != nil {
+		s.idleTimer.Stop()
+		s.idleTimer = nil
+	}
+}
+
 // ClientConnected and ClientDisconnected bracket a WebSocket session.
 //
 // Browsers drop the socket on navigation and reload, so the timeout has to be

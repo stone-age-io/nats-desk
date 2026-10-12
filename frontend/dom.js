@@ -27,6 +27,7 @@ export const els = {
   setAutostart: $("setAutostart"),
   setAutostartRow: $("setAutostartRow"),
   setAutostartHint: $("setAutostartHint"),
+  setQuitOnClose: $("setQuitOnClose"),
   setExe: $("setExe"),
   setLog: $("setLog"),
   setLogRow: $("setLogRow"),

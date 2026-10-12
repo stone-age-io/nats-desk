@@ -90,6 +90,7 @@ nats-desk/
 │   ├── appdir/                 # the two per-user directories we write to
 │   ├── applog/                 # stderr, or a file when there is no console
 │   ├── autostart/              # start at sign-in: Run key, plist, .desktop
+│   ├── settings/               # process preferences: quit-on-close
 │   ├── scheme/                 # the natsdesk:// handler
 │   └── buildinfo/              # the version, stamped in by the linker
 └── Makefile
@@ -120,6 +121,25 @@ picks the destination by calling `os.Stderr.Stat()` and falling back to a file
 binary from the same source, which must keep printing to the terminal. The
 same check does the right thing for a shell that redirects our output: a pipe
 stats fine, so the log follows the pipe.
+
+**A build without `-H=windowsgui` closes its own console, and that is a safety
+net, not the fix.** A plain `go build` - which is what you get on a Windows box
+without `make`, or from a `go install` that was not given
+`-ldflags=-H=windowsgui` (it accepts build flags, `@latest` included) - is a
+console program, and Windows opens a console for it that stays for the life
+of the process; closing that window kills the app. This shipped once and was
+reported as "a console window pops up". `detachConsole` in `cmd/nats-desk`
+calls `FreeConsole` when `GetConsoleProcessList` says we are the console's
+only process, which is exactly the Explorer, Run key and `natsdesk://` cases;
+a terminal we were run
+from has the shell attached too and is left alone. It cannot stop the window
+appearing, only close it again, so such a build still flashes. Only std
+handles that were the console are cleared afterwards - a pipe a parent handed
+us still works. It runs before `applog.Setup`, because clearing them is what
+sends the log to its file. To check a binary, read the PE subsystem field - the
+`uint16` 92 bytes past the offset stored at `0x3c` - which is 2 for GUI and 3
+for console. `go version -m` can only hint: a `make` build shows
+`-trimpath=true`, and `-trimpath` also stops it recording the ldflags.
 
 **The log is appended to, not truncated per run, because runs overlap.** Every
 double-click of an already-running copy starts a second process that lives
@@ -171,6 +191,23 @@ re-downloaded silently stops being the one that gets launched, and the failure
 is invisible - nothing happens at sign-in, and nothing says why. `Sync` only
 rewrites when the stored string differs, so the entry must be byte-stable
 between calls or it would rewrite on every start forever.
+
+**Quit-on-close is the idle timeout, set from a setting.** The backend cannot
+see a window close; it sees the last push-channel socket go. So the setting
+just picks the idle timeout - a 5 second grace when on, which a reload's
+dropped-and-reopened socket fits inside, and none when off - and
+`Server.SetIdleTimeout` applies a change at once. `--idle-timeout`, when given,
+wins for that run, and `-dev` ignores the setting so closing the Vite tab does
+not take the backend with it. It is stored in `settings.json` beside the token
+rather than in the browser, because every window must get the same answer and
+a different browser would not share storage. Off by default: a process that
+outlives its windows is what autostart and the persisted token are built for.
+
+**The push channel opens at page load, not on first use.** It used to open only
+when something needed it - connecting to NATS, or monitoring - so a window that
+never did either was invisible to the socket count, and closing it could never
+trigger an idle shutdown. That was already a latent bug in `--idle-timeout`;
+quit-on-close made it the main path.
 
 **`sw.js` is no longer empty, and it never actually shipped when it was.** It
 sat at `frontend/` rather than `frontend/public/`, so vite never copied it and
@@ -485,6 +522,16 @@ installed shortcut does.
 has a window focuses the existing window instead of opening a second. Close
 the window first or a launch test will look like it did nothing.
 
+To run a test copy beside the real one, give it another `-port` and point
+`APPDATA` and `LOCALAPPDATA` at the scratchpad: the token, `settings.json` and
+the log all follow, so the copy cannot change the real ones. Launch it from
+the repo-root exe path, or with `-dev`, because a normal start re-registers
+the `natsdesk://` handler to whichever exe is running.
+
+To see a console window come and go, `EnumWindows` for visible windows of
+class `ConsoleWindowClass` *or* `CASCADIA_HOSTING_WINDOW_CLASS`. This machine
+hosts consoles in Windows Terminal, so the old class alone finds nothing.
+
 Test rig config lives in the scratchpad, not the repo. Two rigs, on separate
 ports so both run at once:
 
@@ -534,9 +581,11 @@ not provide. Use `make test-race` where a toolchain exists.
 Coverage is currently thin and concentrated on the logic that is easy to get
 silently wrong: the subject filter rules, the KV operation mapping, the
 batching/drop accounting, the context editor's round-trip fidelity, the
-monitoring rate arithmetic, the `natsdesk://` argument parsing, and the token
-file's accept/reject rules. The HTTP and NATS layers are covered by driving the
-real UI against a real server, not by unit tests.
+monitoring rate arithmetic, the `natsdesk://` argument parsing, the token
+file's accept/reject rules, and the idle countdown quit-on-close relies on -
+that a reload survives it and turning it off cancels one already running. The
+HTTP and NATS layers are covered by driving the real UI against a real server,
+not by unit tests.
 
 `internal/services` is the exception: its tests start a real `nats-server` in
 the test process (loopback, random port) and register real micro services.
