@@ -1,0 +1,47 @@
+# Cuts a release when a v* tag is pushed: every target in .goreleaser.yaml,
+# checksums, and a GitHub release whose notes come from the commits in the tag.
+#
+# No Node step, unlike the platform's. The UI is committed in frontend/dist,
+# and the Test step is what proves it is current: TestDistIsCurrent fails a
+# release whose dist is older than its sources, before anything is published.
+#
+# Before tagging, stamp the version into the Windows properties dialog with
+# `make winres VERSION=x.y.z` and commit the .syso files. That is deliberately
+# not done here - see the winres target in the Makefile.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the GitHub release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # goreleaser derives the version and the changelog from tags, and a
+          # shallow clone has neither.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # -count=1 so a cached PASS from some other commit cannot stand in for
+      # this one.
+      - name: Test
+        run: go test -count=1 ./...
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          # The v2 line, not 'latest', so a goreleaser major cannot arrive in
+          # the middle of a release with no commit asking for it.
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

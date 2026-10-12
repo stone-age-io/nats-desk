@@ -1,0 +1,92 @@
+# Build hygiene on every push and pull request, plus two things specific to
+# this repo.
+#
+# The UI is committed in frontend/dist. TestDistIsCurrent, part of the ordinary
+# test run, is what fails when a frontend change lands without its rebuilt
+# dist.
+#
+# The release config is exercised here in snapshot mode. Otherwise its first
+# run is the tag push, and a broken .goreleaser.yaml - or a Windows build that
+# quietly lost -H=windowsgui and opens a console window again - shows up only
+# when a release is already half out.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # goreleaser describes the snapshot version from tags.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would rewrite these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Module hygiene
+        run: go mod tidy -diff
+
+      # A Linux runner only compiles the Linux files. Windows carries most of
+      # the desktop integration - the console, the registry, the default
+      # browser - so vetting per GOOS is the only way that code is type-checked
+      # here at all.
+      - name: Vet every target OS
+        run: |
+          for goos in linux darwin windows freebsd; do
+            echo "==> $goos"
+            GOOS=$goos go vet ./...
+          done
+
+      # -count=1 so a cached PASS from some other commit cannot stand in for
+      # this one.
+      - name: Test
+        run: go test -count=1 ./...
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: build --snapshot --clean
+
+      # Field 92 bytes past the PE header offset stored at 0x3c is the
+      # subsystem: 2 is GUI, 3 is console.
+      - name: Windows binaries are GUI programs
+        run: |
+          status=0
+          for f in dist/*windows*/nats-desk.exe; do
+            pe=$(od -An -t u4 -j 60 -N 4 "$f" | tr -d ' ')
+            sub=$(od -An -t u2 -j $((pe + 92)) -N 2 "$f" | tr -d ' ')
+            echo "$f: subsystem $sub"
+            if [ "$sub" != 2 ]; then
+              echo "::error file=$f::subsystem $sub, expected 2 (GUI). Is -H=windowsgui still in .goreleaser.yaml?"
+              status=1
+            fi
+          done
+          exit $status
+
+      # An unstamped build reports "dev" in the settings panel.
+      - name: The version is stamped in
+        run: |
+          v=$(dist/*linux_amd64*/nats-desk -version)
+          echo "$v"
+          case "$v" in
+            *" dev") echo "::error::version was not stamped in"; exit 1 ;;
+          esac

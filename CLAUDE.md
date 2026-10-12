@@ -68,6 +68,22 @@ make clean
 make install-tools
 ```
 
+## Releasing
+
+Push a `v*` tag and `.github/workflows/release.yml` does the rest: tests, then
+goreleaser builds every target in `.goreleaser.yaml`, archives them with
+checksums, and publishes a GitHub release whose notes are the commits in the
+tag. Before tagging:
+
+1. `make winres VERSION=x.y.z` and commit the `.syso` files, so the Windows
+   properties dialog shows the release's version and not the last one's.
+2. Push to `main` and let CI go green. CI runs the same goreleaser config in
+   snapshot mode, so a broken config fails there and not on the tag.
+3. `git tag -a vx.y.z -m "<one line>"` and push the tag.
+
+`goreleaser build --snapshot --clean` reproduces CI's build locally; output
+goes to `dist/` at the repo root, which is ignored and is not `frontend/dist`.
+
 ## Project Structure
 
 ```

@@ -1,0 +1,108 @@
+# Release configuration. The shape is the agent's and the platform's; what is
+# different about this binary is called out where it applies.
+#
+# The target matrix is `make build-all`'s, which is what the README and
+# CLAUDE.md call supported: Linux, macOS and Windows on amd64 and arm64, and
+# FreeBSD on amd64. All of it cross-compiles from one runner because
+# CGO_ENABLED=0 holds everywhere - the reason this is not a webview app.
+#
+# No `before` hooks, unlike the platform. The UI in frontend/dist is committed
+# (see frontend/embed.go), and the release workflow's `go test ./...` runs
+# TestDistIsCurrent, which fails if dist is older than its sources. Building
+# the frontend here instead would let a release ship a UI that no commit holds,
+# and would put Node back into a build that no longer needs it.
+#
+# The Windows icon and version resources are the committed .syso files, which
+# `go build` picks up by GOARCH on its own. Regenerating them is a local step
+# before tagging (`make winres VERSION=x.y.z`), so this build downloads no tool.
+version: 2
+
+project_name: nats-desk
+
+builds:
+  - id: nats-desk
+    main: ./cmd/nats-desk
+    binary: nats-desk
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/stone-age-io/nats-desk/internal/buildinfo.Version={{ .Version }}
+      # The GUI subsystem, so starting the exe opens no console window. This
+      # shipped without it once and was reported as "a console window pops
+      # up". It is a link error on every other OS, so it is conditional - the
+      # Makefile applies it per target for the same reason. CI asserts the
+      # result on every push.
+      - '{{ if eq .Os "windows" }}-H=windowsgui{{ end }}'
+    goos: [linux, darwin, windows, freebsd]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: freebsd
+        goarch: arm64
+
+archives:
+  - id: nats-desk
+    ids: [nats-desk]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+    name_template: >-
+      nats-desk_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+# No `sort`, unlike the agent and the platform: `asc` sorts by commit
+# subject, alphabetically, which listed this repo's phases as 2, 3, 5, 6, 4.
+# Left unset, the list is git's order, newest first.
+changelog:
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+
+release:
+  github:
+    owner: stone-age-io
+    name: nats-desk
+  # A tag with a prerelease suffix (v0.2.0-rc1) is published as a GitHub
+  # prerelease rather than marked Latest on the repository front page.
+  prerelease: auto
+  header: |
+    ## nats-desk {{ .Tag }}
+
+    A local NATS client: one binary that serves its own UI and talks to NATS
+    over the native protocol, so it works against any server without a
+    `websocket {}` listener.
+
+    Download the archive for your platform, extract it, and run `nats-desk`.
+    The app opens in a window of its own. Running it again while it is already
+    running opens a window onto the same copy rather than starting a second.
+
+    These binaries are not code-signed. A file downloaded with a browser
+    carries a mark that triggers Windows SmartScreen (choose "More info", then
+    "Run anyway") or macOS Gatekeeper (`xattr -d com.apple.quarantine
+    nats-desk`). Fetching the archive with `curl` sets no such mark, and
+    neither does building it yourself:
+
+    ```
+    go install github.com/stone-age-io/nats-desk/cmd/nats-desk@{{ .Tag }}
+    ```
+
+    On Windows, add `-ldflags=-H=windowsgui` to that, or a console window
+    opens alongside the app.
+  footer: |
+    Pre-1.0: treat a minor version as potentially breaking.
+
+    **Full changelog**: https://github.com/stone-age-io/nats-desk/commits/{{ .Tag }}

@@ -26,7 +26,12 @@ cannot do: mutual TLS and custom CAs, importing your `nats` CLI contexts, the
 
 ## Install
 
-With Go installed:
+Download the archive for your platform from the
+[releases page](https://github.com/stone-age-io/nats-desk/releases), extract
+it, and run `nats-desk`. There are builds for Linux, macOS and Windows on
+amd64 and arm64, and FreeBSD on amd64.
+
+Or, with Go installed:
 
 ```bash
 go install github.com/stone-age-io/nats-desk/cmd/nats-desk@latest
@@ -44,7 +49,8 @@ also means no Gatekeeper or SmartScreen prompt: those fire on the mark a
 browser puts on files it downloads, and a binary built on your own machine
 never carries one. Binaries from the releases page are not code-signed, so one
 downloaded *with a browser* does get that prompt; fetching it with `curl` does
-not.
+not. On Windows, "More info" then "Run anyway" gets past it; on macOS,
+`xattr -d com.apple.quarantine nats-desk`.
 
 ## Use
 
