@@ -92,6 +92,7 @@ export const els = {
 
   // --- Subscriptions --------------------------------------------------------
   subSubject: $("subSubject"),
+  subQueue: $("subQueue"),
   btnSub: $("btnSub"),
   excludeSystemChk: $("excludeSystemChk"),
   excludeSystemRow: $("excludeSystemRow"),
@@ -105,6 +106,7 @@ export const els = {
   btnTemplateSave: $("btnTemplateSave"),
   btnTemplateDelete: $("btnTemplateDelete"),
   pubSubject: $("pubSubject"),
+  pubReply: $("pubReply"),
   pubPayload: $("pubPayload"),
   btnHeaderToggle: $("btnHeaderToggle"),
   headerContainer: $("headerContainer"),

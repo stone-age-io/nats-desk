@@ -152,7 +152,7 @@ export function renderNamedOptions(selectEl, items, placeholder) {
 // SUBSCRIPTIONS
 // ============================================================================
 
-export function addSubscription(id, subject, excludeSystem = false) {
+export function addSubscription(id, subject, excludeSystem = false, queue = "") {
   clearEmpty(els.subList);
 
   const li = document.createElement("li");
@@ -161,9 +161,19 @@ export function addSubscription(id, subject, excludeSystem = false) {
   const span = document.createElement("span");
   span.title = "Click to copy into the Publish subject";
   span.textContent = subject;
-  // The badge below lives inside this span, so the click handler reads the
+  // The badges below live inside this span, so the click handler reads the
   // subject from here rather than from the rendered text
   span.dataset.subject = subject;
+
+  // A queue member sees only its share of the traffic, which looks exactly
+  // like lost messages unless the row says so
+  if (queue) {
+    const tag = document.createElement("em");
+    tag.className = "sub-tag sub-tag-queue";
+    tag.title = `Queue group "${queue}": each message goes to one member of the group, so this window sees only its share`;
+    tag.textContent = `queue ${queue}`;
+    span.append(" ", tag);
+  }
 
   // The subject alone no longer says what the subscription delivers, so a
   // filtered one is labelled - otherwise missing $JS traffic looks like a bug
@@ -899,31 +909,33 @@ function tryParsePayload(rawData) {
   return rawData;
 }
 
-function addToLogHistory(subject, rawData, isRpc, headers) {
+function addToLogHistory(subject, rawData, isRpc, headers, reply) {
   let headerObj = null;
   if (headers) {
     headerObj = {};
     for (const [key, value] of Object.entries(headers)) headerObj[key] = value;
   }
 
-  logHistory.push({
+  const entry = {
     timestamp: new Date().toISOString(),
     type: isRpc ? "RPC" : "MSG",
     subject,
-    headers: headerObj,
-    payload: tryParsePayload(rawData),
-  });
+  };
+  if (reply) entry.reply = reply;
+  entry.headers = headerObj;
+  entry.payload = tryParsePayload(rawData);
+  logHistory.push(entry);
 
   if (logHistory.length > MAX_LOG_HISTORY) logHistory.shift();
 }
 
-function createMessageDiv(subject, data, isRpc, msgHeaders) {
+function createMessageDiv(subject, data, isRpc, msgHeaders, reply) {
   const div = document.createElement("div");
   div.className = "msg-entry";
 
   // Respect an active filter so incoming messages don't jump the list
   const filterText = els.logFilter.value.toLowerCase();
-  if (filterText && !(subject + data).toLowerCase().includes(filterText)) {
+  if (filterText && !(subject + " " + reply + " " + data).toLowerCase().includes(filterText)) {
     div.hidden = true;
   }
 
@@ -942,13 +954,36 @@ function createMessageDiv(subject, data, isRpc, msgHeaders) {
   const subjectEl = document.createElement("span");
   subjectEl.className = "msg-subject";
   subjectEl.textContent = subject;
+  meta.append(badge, time, subjectEl);
+
+  const actions = document.createElement("span");
+  actions.className = "msg-actions push-right";
+
+  // A reply subject means someone is waiting for an answer - a request, or a
+  // publish that named where replies should go. Reply loads it into the
+  // composer; main.js handles the click.
+  if (reply) {
+    const replyEl = document.createElement("span");
+    replyEl.className = "msg-reply";
+    replyEl.title = "Reply subject";
+    replyEl.textContent = `↩ ${reply}`;
+    meta.append(replyEl);
+
+    const replyBtn = document.createElement("button");
+    replyBtn.className = "msg-action reply-btn";
+    replyBtn.dataset.reply = reply;
+    replyBtn.title = `Publish an answer to ${reply}`;
+    replyBtn.textContent = "Reply";
+    actions.append(replyBtn);
+  }
 
   const copy = document.createElement("button");
-  copy.className = "copy-btn push-right";
+  copy.className = "copy-btn";
   copy.dataset.msgId = msgId;
   copy.textContent = "Copy JSON";
+  actions.append(copy);
 
-  meta.append(badge, time, subjectEl, copy);
+  meta.append(actions);
   div.append(meta);
 
   if (msgHeaders) {
@@ -1045,14 +1080,14 @@ export function initializeLogScrollTracking() {
   els.btnJumpLatest.addEventListener("click", jumpToLatest);
 }
 
-export function renderMessage(subject, data, isRpc = false, msgHeaders = null) {
+export function renderMessage(subject, data, isRpc = false, msgHeaders = null, reply = "") {
   // RPC replies always render - they are a direct response to a user action
   if (isPaused && !isRpc) return;
 
-  addToLogHistory(subject, data, isRpc, msgHeaders);
+  addToLogHistory(subject, data, isRpc, msgHeaders, reply);
   clearEmpty(els.messages);
 
-  const div = createMessageDiv(subject, data, isRpc, msgHeaders);
+  const div = createMessageDiv(subject, data, isRpc, msgHeaders, reply);
   const wasAtEdge = atLiveEdge();
 
   if (newestFirst) els.messages.prepend(div);

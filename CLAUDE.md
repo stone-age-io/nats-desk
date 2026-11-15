@@ -347,6 +347,22 @@ silent gap in a message log is a lie. See `internal/ws/hub.go`.
 on arrival and could only ever show a hex stub for binary. Now the bytes
 survive end to end and only the *display* falls back to hex.
 
+**The reply subject travels with every message.** Without it a request in the
+log looks like any other message and nothing can answer it. The log shows it,
+and Reply loads it into the composer's subject. Reply also *clears* the
+reply-to box, because an answer that itself asks for an answer is almost never
+meant, and a stale reply-to left over from an earlier publish would go out
+with it unseen. Reply-to applies to Pub only; Req always makes its own inbox.
+nats.go rejects a bad reply subject with the same `ErrBadSubject` as a bad
+subject, so the error names both fields rather than blaming the wrong one.
+
+**A queue subscription is tagged, and the queue box clears after every
+subscribe.** A queue member gets only its share of the traffic, which looks
+exactly like lost messages unless the row says why. Clearing the box means
+joining a group has to be asked for each time, never carried over unnoticed.
+Saved subscriptions are keyed by subject *and* queue: `orders.>` alone and
+`orders.>` in a group deliver different things and can both exist at once.
+
 **The three monitoring sources are not interchangeable, and one of them cannot
 be merged with the data connection even in principle.** A `nats.Conn` is bound
 to one account for its lifetime, so a system-account view is *mandatorily* a
@@ -482,6 +498,29 @@ the value itself and both directions agree.
 **KV keys can contain "/".** The routes use `{key...}` trailing wildcards, and
 the client encodes each slash-separated segment individually, so
 `config/db/host` keeps its structure while everything else is escaped.
+
+**A KV save only goes through if the key is still at the revision the editor
+loaded.** An unconditional Put lets two editors overwrite each other: open a
+key at revision 5, someone writes 6, and Save replaces 6 with neither side
+told. `lastRevision` has three meanings: absent writes unconditionally, `0`
+means create-only, and anything else means update only at that revision. A key typed
+by name and never loaded is a create, so it cannot silently replace one that
+exists. A refusal is **412**, not 400, carrying the revision the key is at
+now (0 if deleted or purged), and the "Save anyway" that follows is
+conditional on *that* revision, so a key that moves again while the dialog
+is open is asked about again. Details that bite:
+
+- Match both `ErrKeyRevisionMismatch` (from Update) and `ErrKeyExists` (from
+  Create). Not `ErrKeyExists` alone: it matches by error code 10071, and a
+  replicated bucket reports a failed Update as 10164.
+- Create over a tombstone succeeds - jetstream handles the delete marker - so
+  deleting your own key resets the editor to revision 0 and the next save
+  recreates it, rather than conflicting with what you just deleted.
+- Viewing an old revision from History does not change the loaded revision.
+  Saving it is "restore this", and must still be refused if HEAD has moved.
+- A KV revision is the bucket's *stream sequence*, shared by every key, so
+  one key's revisions go 1, 3, 4 when another key wrote 2. A conflict
+  dialog saying "now at revision 3" after a single outside write is correct.
 
 **`ui.js` takes headers as a plain object.** They used to arrive as a NATS
 `MsgHdrs`, which iterates as `[key, value]` pairs; `ui.js` was already
@@ -631,7 +670,7 @@ C compiler, which the global `CGO_ENABLED=0` and a typical Windows dev box do
 not provide. Use `make test-race` where a toolchain exists.
 
 Coverage is currently thin and concentrated on the logic that is easy to get
-silently wrong: the subject filter rules, the KV operation mapping, the
+silently wrong: the subject filter rules, the KV operation mapping, KV write conflicts, the
 batching/drop accounting, the context editor's round-trip fidelity, the
 monitoring rate arithmetic, the `natsdesk://` argument parsing, the token
 file's accept/reject rules, and the idle countdown quit-on-close relies on -
@@ -641,9 +680,12 @@ what fails when `frontend/dist` falls behind its sources. The HTTP and NATS
 layers are covered by driving the real UI against a real server, not by unit
 tests.
 
-`internal/services` is the exception: its tests start a real `nats-server` in
-the test process (loopback, random port) and register real micro services.
-What they check is mostly the server's behaviour - what "no responders" looks
+`internal/services` is the exception, and so is `internal/natsconn`'s
+`kv_cas_test.go`: they start a real `nats-server` in the test process
+(loopback, random port; JetStream in a temp dir for the KV tests). The KV
+tests pin down which error a stale revision produces and what a tombstone
+does to a create-only write. The services tests register real micro services,
+and what those check is mostly the server's behaviour - what "no responders" looks
 like, what a refused publish looks like, when an unsubscribe takes effect - and
 a fake would only encode guesses about all three. `censusTimeout` and
 `maxInstances` are vars so the refusal and cap tests do not wait seconds or

@@ -314,16 +314,72 @@ func (m *Manager) KvHistory(ctx context.Context, key string) ([]*KvEntry, error)
 	return out, nil
 }
 
-func (m *Manager) KvPut(ctx context.Context, key string, value []byte) (uint64, error) {
+// KvConflictError is a conditional write that found the key somewhere other
+// than where the caller last saw it. Current is the revision it is at now, or
+// 0 when it does not exist - never written, deleted or purged - which is
+// exactly the state a create-only write expects.
+type KvConflictError struct {
+	Key      string
+	Expected uint64
+	Current  uint64
+}
+
+func (e *KvConflictError) Error() string {
+	switch {
+	case e.Expected == 0:
+		return fmt.Sprintf("key %q already exists (revision %d)", e.Key, e.Current)
+	case e.Current == 0:
+		return fmt.Sprintf("key %q was deleted after revision %d was loaded", e.Key, e.Expected)
+	default:
+		return fmt.Sprintf("key %q changed after revision %d was loaded - it is now at revision %d",
+			e.Key, e.Expected, e.Current)
+	}
+}
+
+// KvPut writes a key.
+//
+// last makes the write conditional, which is what stops an editor silently
+// discarding someone else's change: open a key at revision 5, someone writes
+// 6, and an unconditional save would replace 6 without either side knowing.
+//
+//   - nil writes unconditionally.
+//   - 0 writes only if the key does not exist. A deleted key counts as not
+//     existing - jetstream's Create handles the tombstone itself.
+//   - anything else writes only if that is still the key's latest revision.
+//
+// Both refusals come back as *KvConflictError carrying the revision the key
+// is at now, so the caller can offer to overwrite that one specifically.
+func (m *Manager) KvPut(ctx context.Context, key string, value []byte, last *uint64) (uint64, error) {
 	kv, err := m.kvHandle()
 	if err != nil {
 		return 0, err
 	}
-	rev, err := kv.Put(ctx, key, value)
-	if err != nil {
-		return 0, fmt.Errorf("failed to put key %q: %w", key, err)
+
+	var rev uint64
+	switch {
+	case last == nil:
+		rev, err = kv.Put(ctx, key, value)
+	case *last == 0:
+		rev, err = kv.Create(ctx, key, value)
+	default:
+		rev, err = kv.Update(ctx, key, value, *last)
 	}
-	return rev, nil
+	if err == nil {
+		return rev, nil
+	}
+
+	// Both sentinels, because the two calls report a conflict differently:
+	// Update wraps ErrKeyRevisionMismatch and Create wraps ErrKeyExists. Do
+	// not match on ErrKeyExists alone - on a replicated bucket a failed
+	// Update carries a different error code and would not match it.
+	if last != nil && (errors.Is(err, jetstream.ErrKeyRevisionMismatch) || errors.Is(err, jetstream.ErrKeyExists)) {
+		conflict := &KvConflictError{Key: key, Expected: *last}
+		if e, gerr := kv.Get(ctx, key); gerr == nil {
+			conflict.Current = e.Revision()
+		}
+		return 0, conflict
+	}
+	return 0, fmt.Errorf("failed to put key %q: %w", key, err)
 }
 
 func (m *Manager) KvDelete(ctx context.Context, key string) error {

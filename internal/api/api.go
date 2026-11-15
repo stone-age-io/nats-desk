@@ -178,6 +178,7 @@ func fromNatsHeader(h nats.Header) map[string][]string {
 func (a *API) publish(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Subject string              `json:"subject"`
+		Reply   string              `json:"reply"`
 		Data    string              `json:"data"`
 		Headers map[string][]string `json:"headers"`
 	}
@@ -193,7 +194,7 @@ func (a *API) publish(w http.ResponseWriter, r *http.Request) {
 		fail(w, errors.New("payload was not valid base64"))
 		return
 	}
-	if err := a.mgr.Publish(req.Subject, data, toNatsHeader(req.Headers)); err != nil {
+	if err := a.mgr.Publish(req.Subject, req.Reply, data, toNatsHeader(req.Headers)); err != nil {
 		fail(w, err)
 		return
 	}
@@ -243,6 +244,7 @@ func (a *API) request(w http.ResponseWriter, r *http.Request) {
 func (a *API) subscribe(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Subject       string `json:"subject"`
+		Queue         string `json:"queue"`
 		ExcludeSystem bool   `json:"excludeSystem"`
 	}
 	if !decode(w, r, &req) {
@@ -252,7 +254,7 @@ func (a *API) subscribe(w http.ResponseWriter, r *http.Request) {
 		fail(w, errors.New("a subject is required"))
 		return
 	}
-	res, err := a.mgr.Subscribe(req.Subject, req.ExcludeSystem)
+	res, err := a.mgr.Subscribe(req.Subject, req.Queue, req.ExcludeSystem)
 	if err != nil {
 		fail(w, err)
 		return

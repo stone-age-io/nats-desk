@@ -27,7 +27,9 @@ const statsPollInterval = 2 * time.Second
 // Sink receives everything the manager pushes out. The WebSocket hub
 // implements it; nothing in this package knows about HTTP.
 type Sink interface {
-	Message(subID uint64, subject string, data []byte, headers nats.Header)
+	// reply is the message's reply subject, empty when it has none. A request
+	// is only answerable from the UI if this survives the trip.
+	Message(subID uint64, subject, reply string, data []byte, headers nats.Header)
 	Status(state string, err error)
 	Stats(rttMillis float64)
 	KvChange(key, operation string)
@@ -46,6 +48,7 @@ type TailMsg struct {
 type subscription struct {
 	sub           *nats.Subscription
 	subject       string
+	queue         string
 	excludeSystem bool
 }
 
@@ -280,12 +283,18 @@ func (m *Manager) pollStats(nc *nats.Conn, stop <-chan struct{}) {
 type SubResult struct {
 	ID            uint64 `json:"id"`
 	Subject       string `json:"subject"`
+	Queue         string `json:"queue,omitempty"`
 	ExcludeSystem bool   `json:"excludeSystem"`
 	Size          int    `json:"size"`
 }
 
 // Subscribe registers a subscription and streams its messages to the sink.
-func (m *Manager) Subscribe(subject string, excludeSystem bool) (SubResult, error) {
+//
+// A non-empty queue joins that queue group, so the server hands each message
+// to one member of the group rather than to every subscriber - this window
+// becomes one more worker beside whatever else is in the group, and sees only
+// its share of the traffic.
+func (m *Manager) Subscribe(subject, queue string, excludeSystem bool) (SubResult, error) {
 	nc, err := m.conn()
 	if err != nil {
 		return SubResult{}, err
@@ -300,22 +309,32 @@ func (m *Manager) Subscribe(subject string, excludeSystem bool) (SubResult, erro
 	id := m.nextSubID
 	m.mu.Unlock()
 
-	sub, err := nc.Subscribe(subject, func(msg *nats.Msg) {
+	handler := func(msg *nats.Msg) {
 		if exclude && IsSystemSubject(msg.Subject) {
 			return
 		}
-		m.sink.Message(id, msg.Subject, msg.Data, msg.Header)
-	})
+		m.sink.Message(id, msg.Subject, msg.Reply, msg.Data, msg.Header)
+	}
+
+	var sub *nats.Subscription
+	if queue != "" {
+		sub, err = nc.QueueSubscribe(subject, queue, handler)
+	} else {
+		sub, err = nc.Subscribe(subject, handler)
+	}
 	if err != nil {
+		if errors.Is(err, nats.ErrBadQueueName) {
+			return SubResult{}, fmt.Errorf("%q is not a valid queue group name", queue)
+		}
 		return SubResult{}, fmt.Errorf("failed to subscribe to %s: %w", subject, err)
 	}
 
 	m.mu.Lock()
-	m.subs[id] = &subscription{sub: sub, subject: subject, excludeSystem: exclude}
+	m.subs[id] = &subscription{sub: sub, subject: subject, queue: queue, excludeSystem: exclude}
 	size := len(m.subs)
 	m.mu.Unlock()
 
-	return SubResult{ID: id, Subject: subject, ExcludeSystem: exclude, Size: size}, nil
+	return SubResult{ID: id, Subject: subject, Queue: queue, ExcludeSystem: exclude, Size: size}, nil
 }
 
 func (m *Manager) Unsubscribe(id uint64) (SubResult, error) {
@@ -333,16 +352,25 @@ func (m *Manager) Unsubscribe(id uint64) (SubResult, error) {
 	if err := s.sub.Unsubscribe(); err != nil {
 		return SubResult{Size: size}, fmt.Errorf("failed to unsubscribe: %w", err)
 	}
-	return SubResult{ID: id, Subject: s.subject, ExcludeSystem: s.excludeSystem, Size: size}, nil
+	return SubResult{ID: id, Subject: s.subject, Queue: s.queue, ExcludeSystem: s.excludeSystem, Size: size}, nil
 }
 
-func (m *Manager) Publish(subject string, data []byte, headers nats.Header) error {
+// Publish sends one message. A non-empty reply sets its reply subject, which
+// is how a request is made by hand: the answer goes to a subject of the
+// caller's choosing - one this window may be subscribed to - rather than to a
+// private inbox that only Request can see.
+func (m *Manager) Publish(subject, reply string, data []byte, headers nats.Header) error {
 	nc, err := m.conn()
 	if err != nil {
 		return err
 	}
-	msg := &nats.Msg{Subject: subject, Data: data, Header: headers}
+	msg := &nats.Msg{Subject: subject, Reply: reply, Data: data, Header: headers}
 	if err := nc.PublishMsg(msg); err != nil {
+		// nats.go reports a bad reply subject as the same ErrBadSubject as a
+		// bad subject, so name both rather than blame the wrong field.
+		if errors.Is(err, nats.ErrBadSubject) && reply != "" {
+			return fmt.Errorf("failed to publish: %q or reply subject %q is not a valid subject", subject, reply)
+		}
 		return fmt.Errorf("failed to publish: %w", err)
 	}
 	// Publish is buffered; without this the UI would report success before

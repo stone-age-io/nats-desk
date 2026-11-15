@@ -49,6 +49,14 @@ const appState = {
   // Name of the currently selected KV bucket (string) or null
   currentKvBucket: null,
 
+  // The key in the editor and the revision it was at when loaded, as
+  // { key, revision }, or null. A save is conditional on that revision, so
+  // it is refused rather than replacing a change made since. Revision 0
+  // means the key did not exist when loaded, and a save is then create-only.
+  // Viewing an old revision from history does not change it: saving one is
+  // "restore this", and must still be refused if HEAD has moved on.
+  kvLoaded: null,
+
   // AsyncIterable streaming key change events. Must be stopped before
   // opening another bucket or the watcher leaks.
   currentKvWatcher: null,
@@ -1095,22 +1103,27 @@ els.creds.addEventListener("change", () => {
 
 /**
  * Subscribe to a subject and add it to the UI
- * @param {string} subj - Subject to subscribe to
- * @param {boolean} excludeSystem - Drop $SYS/$JS/$KV/_INBOX traffic
+ * @param {{subject: string, queue?: string, excludeSystem?: boolean}} sub
+ *   queue joins a queue group; excludeSystem drops $SYS/$JS/$KV/_INBOX traffic
  * @param {boolean} quiet - Suppress the success toast (used during bulk restore)
- * @returns {boolean} - Whether the exclusion actually applies to this pattern
+ * @returns {Promise<object>} - What the backend actually set up, which is what
+ *   should be saved: the exclusion only applies to some patterns
  */
-async function subscribeTo(subj, excludeSystem = false, quiet = false) {
-  const res = await nats.subscribe(subj, (s, data, isRpc, headers) => {
-    ui.renderMessage(s, data, isRpc, headers);
-  }, { excludeSystem });
+async function subscribeTo({ subject, queue = "", excludeSystem = false }, quiet = false) {
+  const res = await nats.subscribe(subject, (s, data, isRpc, headers, reply) => {
+    ui.renderMessage(s, data, isRpc, headers, reply);
+  }, { queue, excludeSystem });
 
-  ui.addSubscription(res.id, res.subject, res.excludeSystem);
+  ui.addSubscription(res.id, res.subject, res.excludeSystem, res.queue || "");
   ui.updateSubCount(res.size);
   if (!quiet) {
-    ui.showToast(`Subscribed to ${res.subject}${res.excludeSystem ? " (system subjects hidden)" : ""}`, "success");
+    const notes = [
+      res.queue ? `in queue group ${res.queue}` : "",
+      res.excludeSystem ? "system subjects hidden" : "",
+    ].filter(Boolean);
+    ui.showToast(`Subscribed to ${res.subject}${notes.length ? ` (${notes.join(", ")})` : ""}`, "success");
   }
-  return res.excludeSystem;
+  return res;
 }
 
 async function restoreSubscriptions(url) {
@@ -1118,12 +1131,12 @@ async function restoreSubscriptions(url) {
   if (saved.length === 0) return;
 
   let count = 0;
-  for (const { subject, excludeSystem } of saved) {
+  for (const sub of saved) {
     try {
-      await subscribeTo(subject, excludeSystem, true);
+      await subscribeTo(sub, true);
       count++;
     } catch (err) {
-      console.error(`Failed to restore subscription '${subject}':`, err);
+      console.error(`Failed to restore subscription '${sub.subject}':`, err);
     }
   }
   if (count > 0) ui.showToast(`Restored ${count} subscription${count > 1 ? "s" : ""}`, "info");
@@ -1132,6 +1145,7 @@ async function restoreSubscriptions(url) {
 async function handleSubscribe() {
   const subj = els.subSubject.value.trim();
   if (!subj) return;
+  const queue = els.subQueue.value.trim();
 
   try {
     storage.addSubjectToHistory(subj);
@@ -1139,11 +1153,15 @@ async function handleSubscribe() {
 
     // Save what the subscription is really doing, not what was ticked: on a
     // pattern like $JS.> the box is inert and restoring it must stay inert
-    const applied = await subscribeTo(subj, els.excludeSystemChk.checked);
+    const res = await subscribeTo({ subject: subj, queue, excludeSystem: els.excludeSystemChk.checked });
     if (appState.connectedUrl) {
-      storage.addSavedSubscription(appState.connectedUrl, subj, applied);
+      storage.addSavedSubscription(appState.connectedUrl, subj, res.excludeSystem, res.queue || "");
     }
     els.subSubject.value = "";
+    // Cleared too, deliberately: a queue member sees only a share of the
+    // traffic, so joining one has to be asked for each time rather than
+    // carried over to the next subscription unnoticed
+    els.subQueue.value = "";
     syncExcludeSystemRow();
   } catch (err) {
     console.error("Subscribe error:", err);
@@ -1168,11 +1186,11 @@ function syncExcludeSystemRow() {
 
 async function handleUnsubscribe(id) {
   try {
-    const { size, subject } = await nats.unsubscribe(id);
+    const { size, subject, queue } = await nats.unsubscribe(id);
     ui.removeSubscription(id);
     ui.updateSubCount(size);
     if (subject && appState.connectedUrl) {
-      storage.removeSavedSubscription(appState.connectedUrl, subject);
+      storage.removeSavedSubscription(appState.connectedUrl, subject, queue || "");
     }
   } catch (error) {
     console.error("Unsubscribe error:", error);
@@ -1182,6 +1200,9 @@ async function handleUnsubscribe(id) {
 
 els.btnSub.addEventListener("click", handleSubscribe);
 els.subSubject.addEventListener("keyup", (e) => {
+  if (e.key === "Enter") handleSubscribe();
+});
+els.subQueue.addEventListener("keyup", (e) => {
   if (e.key === "Enter") handleSubscribe();
 });
 els.subSubject.addEventListener("input", syncExcludeSystemRow);
@@ -1206,7 +1227,7 @@ async function handlePublish() {
   try {
     storage.addSubjectToHistory(subj);
     refreshHistoryUi();
-    await nats.publish(subj, els.pubPayload.value, ui.readHeadersJson());
+    await nats.publish(subj, els.pubPayload.value, ui.readHeadersJson(), els.pubReply.value.trim());
 
     els.btnPub.textContent = "✓";
     setTimeout(() => (els.btnPub.textContent = "Pub"), 1000);
@@ -1288,6 +1309,7 @@ function handleTemplateChange() {
   if (!template) return;
 
   els.pubSubject.value = template.subject || "";
+  els.pubReply.value = template.reply || "";
   els.pubPayload.value = template.payload || "";
   // Templates still store headers as a JSON string; fan it back out into rows
   let headerObj = {};
@@ -1315,6 +1337,7 @@ async function handleTemplateSave() {
   storage.saveTemplate({
     name,
     subject: els.pubSubject.value.trim(),
+    reply: els.pubReply.value.trim(),
     payload: els.pubPayload.value,
     headers: ui.readHeadersJson(),
   });
@@ -1351,6 +1374,27 @@ els.btnTemplateDelete.addEventListener("click", handleTemplateDelete);
 // ============================================================================
 // MESSAGE LOG HANDLERS
 // ============================================================================
+
+/**
+ * Answer a message from the log: its reply subject becomes the composer's
+ * subject. The reply-to box is cleared, because an answer that itself asks
+ * for a reply is almost never what was meant - and a stale one left behind
+ * from an earlier publish would ride along unseen.
+ *
+ * The payload is left alone: it is the user's, and may be the answer they
+ * already typed.
+ */
+function handleLogReply(reply) {
+  els.pubSubject.value = reply;
+  els.pubReply.value = "";
+  if (els.composer.classList.contains("is-collapsed")) handleComposerToggle();
+  els.pubPayload.focus();
+}
+
+els.messages.addEventListener("click", (e) => {
+  const btn = e.target.closest(".reply-btn");
+  if (btn) handleLogReply(btn.dataset.reply);
+});
 
 els.btnClear.addEventListener("click", () => ui.clearLogs());
 els.logFilter.addEventListener("keyup", (e) => ui.filterLogs(e.target.value));
@@ -1478,6 +1522,7 @@ async function selectKvBucket(bucket) {
 
   els.kvKeyList.replaceChildren();
   appState.kvKeys.clear();
+  appState.kvLoaded = null;
 
   // Stop the previous watcher or it keeps delivering into a dead bucket
   if (appState.currentKvWatcher) {
@@ -1531,6 +1576,7 @@ function cleanupKvUi() {
   els.kvDetailView.hidden = true;
   els.kvEmptyState.hidden = false;
   appState.kvKeys.clear();
+  appState.kvLoaded = null;
 }
 
 async function handleKvDeleteBucket() {
@@ -1605,6 +1651,7 @@ async function selectKeyWrapper(key) {
   els.kvValueInput.value = "";
   els.kvValueHighlighter.textContent = "Loading…";
   els.kvRevLabel.textContent = "";
+  appState.kvLoaded = null;
 
   try {
     const res = await nats.getKvValue(key);
@@ -1613,9 +1660,11 @@ async function selectKeyWrapper(key) {
       utils.formatJson(els.kvValueInput);
       setKvEditMode(false);
       els.kvRevLabel.textContent = `rev ${res.revision}`;
+      appState.kvLoaded = { key, revision: res.revision };
       ui.setKvStatus(`Loaded '${key}'`);
     } else {
       els.kvValueHighlighter.textContent = "";
+      appState.kvLoaded = { key, revision: 0 };
       ui.setKvStatus("Key not found", true);
     }
 
@@ -1674,15 +1723,51 @@ async function handleKvPut() {
     return;
   }
 
+  // The revision this editor last saw. A key typed in by name and never
+  // loaded counts as new, so the save refuses to replace one that exists.
+  const loaded = appState.kvLoaded;
+  const last = loaded && loaded.key === key ? loaded.revision : 0;
+  await saveKvValue(key, els.kvValueInput.value, last);
+}
+
+/**
+ * Write a key, conditional on `last` - the revision it was seen at, or 0 for
+ * "must not exist". When that no longer holds, ask before overwriting, and
+ * make the overwrite conditional on the revision the dialog named: if the
+ * key moves again while the dialog is open, the user is asked again rather
+ * than replacing something they were never shown.
+ */
+async function saveKvValue(key, value, last) {
   try {
-    await nats.putKvValue(key, els.kvValueInput.value);
+    await nats.putKvValue(key, value, last);
     ui.setKvStatus(`Saved '${key}'`);
     ui.showToast("Key saved", "success");
     selectKeyWrapper(key);
   } catch (e) {
-    console.error("KV put error:", e);
-    ui.setKvStatus(e.message, true);
-    ui.showToast(e.message, "error");
+    if (!e.body?.conflict) {
+      console.error("KV put error:", e);
+      ui.setKvStatus(e.message, true);
+      ui.showToast(e.message, "error");
+      return;
+    }
+
+    const current = e.body.revision;
+    const question = current
+      ? `Save anyway, replacing revision ${current}?`
+      : "Save anyway, creating it again?";
+    const what = e.message.charAt(0).toUpperCase() + e.message.slice(1);
+    const ok = await dlg.confirmDialog({
+      title: "Key has changed",
+      message: `${what}.\n\n${question}\n\n` +
+        "Cancel keeps your edit in the editor, so you can copy it before loading the new value.",
+      confirmLabel: "Save anyway",
+      danger: true,
+    });
+    if (ok) {
+      await saveKvValue(key, value, current);
+      return;
+    }
+    ui.setKvStatus(`Not saved - your edit to '${key}' is still in the editor`, true);
   }
 }
 
@@ -1700,6 +1785,9 @@ async function handleKvDelete() {
 
   try {
     await nats.deleteKvValue(key);
+    // Gone by our own hand, so the next save here is a create - not a
+    // conflict with the revision this editor loaded before deleting it
+    appState.kvLoaded = { key, revision: 0 };
     ui.setKvStatus(`Deleted '${key}'`);
     els.kvValueInput.value = "";
     els.kvValueHighlighter.textContent = "";
@@ -1725,6 +1813,7 @@ async function handleKvPurge() {
 
   try {
     await nats.purgeKvValue(key);
+    appState.kvLoaded = { key, revision: 0 };
     ui.setKvStatus(`Purged '${key}'`);
     els.kvValueInput.value = "";
     els.kvValueHighlighter.textContent = "";

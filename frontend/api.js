@@ -87,7 +87,12 @@ async function call(method, path, body) {
   }
 
   if (!res.ok) {
-    throw new Error((payload && payload.error) || `Request failed (${res.status})`);
+    // The status and body ride along for the few callers that act on more
+    // than the message - a KV write conflict carries the key's revision.
+    const err = new Error((payload && payload.error) || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.body = payload;
+    throw err;
   }
   return payload;
 }
@@ -190,7 +195,7 @@ function dispatch(frame) {
       break;
     case "msg": {
       const h = subHandlers.get(frame.subId);
-      if (h) h(frame.subject, decodePayload(frame.data), false, frame.headers || null);
+      if (h) h(frame.subject, decodePayload(frame.data), false, frame.headers || null, frame.reply || "");
       break;
     }
     case "status":
@@ -311,10 +316,18 @@ export function canExcludeSystem(subject) {
 // PUB / SUB
 // ============================================================================
 
+/**
+ * Subscribe. `onMessage(subject, data, isRpc, headers, reply)` - reply is the
+ * message's reply subject, or "" when it has none.
+ *
+ * `opts.queue` joins a queue group: the server then gives each message to one
+ * member of the group, so this window sees only its share.
+ */
 export async function subscribe(subject, onMessage, opts = {}) {
   await connectWs();
   const res = await post("/api/sub", {
     subject,
+    queue: opts.queue || "",
     excludeSystem: !!opts.excludeSystem,
   });
   subHandlers.set(res.id, onMessage);
@@ -326,9 +339,11 @@ export async function unsubscribe(id) {
   return await del(`/api/sub/${id}`);
 }
 
-export async function publish(subject, payload, headersJson) {
+/** Publish. A non-empty `reply` sets the message's reply subject. */
+export async function publish(subject, payload, headersJson, reply = "") {
   return await post("/api/publish", {
     subject,
+    reply,
     data: bytesToB64(encoder.encode(payload)),
     headers: parseHeaders(headersJson),
   });
@@ -445,10 +460,18 @@ export async function getKvHistory(key) {
   }));
 }
 
-export async function putKvValue(key, value) {
-  return await call("PUT", `/api/kv/keys/${keyPath(key)}`, {
-    value: bytesToB64(encoder.encode(value)),
-  });
+/**
+ * Write a key, conditionally.
+ *
+ * `lastRevision` is the revision the caller last saw: the write only lands if
+ * the key is still there, and 0 means "only if the key does not exist". Leave
+ * it null to write unconditionally. A refusal throws with `err.body.conflict`
+ * set and `err.body.revision` holding where the key is now (0 if gone).
+ */
+export async function putKvValue(key, value, lastRevision = null) {
+  const body = { value: bytesToB64(encoder.encode(value)) };
+  if (lastRevision != null) body.lastRevision = lastRevision;
+  return await call("PUT", `/api/kv/keys/${keyPath(key)}`, body);
 }
 
 export async function deleteKvValue(key) {

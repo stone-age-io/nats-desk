@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/stone-age-io/nats-desk/internal/natsconn"
 )
 
 // KV keys may contain '/' and '.', so the path parameter is a trailing
@@ -152,9 +153,15 @@ func (a *API) kvGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// kvPut writes a key. lastRevision makes the write conditional - see
+// natsconn.Manager.KvPut - and a refusal is 412 rather than the usual 400,
+// with the key's current revision alongside, so the UI can tell "someone else
+// changed this" apart from "the server said no" and offer an overwrite that
+// is itself conditional on what it is about to replace.
 func (a *API) kvPut(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Value string `json:"value"`
+		Value        string  `json:"value"`
+		LastRevision *uint64 `json:"lastRevision"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -164,8 +171,17 @@ func (a *API) kvPut(w http.ResponseWriter, r *http.Request) {
 		fail(w, errors.New("value was not valid base64"))
 		return
 	}
-	rev, err := a.mgr.KvPut(r.Context(), r.PathValue("key"), value)
+	rev, err := a.mgr.KvPut(r.Context(), r.PathValue("key"), value, req.LastRevision)
 	if err != nil {
+		var conflict *natsconn.KvConflictError
+		if errors.As(err, &conflict) {
+			writeJSON(w, http.StatusPreconditionFailed, map[string]any{
+				"error":    conflict.Error(),
+				"conflict": true,
+				"revision": conflict.Current,
+			})
+			return
+		}
 		fail(w, err)
 		return
 	}

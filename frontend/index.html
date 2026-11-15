@@ -196,6 +196,9 @@
                      autocorrect="off" autocapitalize="off" spellcheck="false" data-requires-conn />
               <button id="btnSub" class="accent icon-btn" title="Subscribe" data-requires-conn>+</button>
             </div>
+            <input type="text" id="subQueue" class="sm-input" placeholder="Queue group (optional)"
+                   title="Join a queue group: each message goes to one member of the group, so this window sees only its share"
+                   autocorrect="off" autocapitalize="off" spellcheck="false" data-requires-conn />
             <label class="check-row sub-add-opt" id="excludeSystemRow">
               <input type="checkbox" id="excludeSystemChk" checked />
               <span>Hide system subjects <span class="muted-xs">($JS, $SYS, $KV, _INBOX&#8230;)</span></span>
@@ -244,11 +247,19 @@
                   </button>
                   <button id="btnFormatPayload" class="sm-btn" title="Pretty-print the payload as JSON">Format</button>
                 </div>
-                <label class="inline-field">
-                  Req timeout
-                  <input type="number" id="reqTimeout" value="2000" class="sm-input timeout"
-                         aria-label="Request timeout in milliseconds" /> ms
-                </label>
+                <div class="composer-opts-group">
+                  <label class="inline-field" title="Reply subject sent with Pub. Req always uses its own inbox.">
+                    Reply-to
+                    <input type="text" id="pubReply" list="subHistory" class="sm-input subj" placeholder="(none)"
+                           autocorrect="off" autocapitalize="off" spellcheck="false"
+                           aria-label="Reply subject for Pub" />
+                  </label>
+                  <label class="inline-field">
+                    Req timeout
+                    <input type="number" id="reqTimeout" value="2000" class="sm-input timeout"
+                           aria-label="Request timeout in milliseconds" /> ms
+                  </label>
+                </div>
               </div>
 
               <div id="headerContainer" hidden>

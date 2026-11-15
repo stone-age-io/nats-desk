@@ -252,11 +252,12 @@ func (h *Hub) sendCtrl(v any) {
 // natsconn.Sink
 // ============================================================================
 
-func (h *Hub) Message(subID uint64, subject string, data []byte, headers nats.Header) {
+func (h *Hub) Message(subID uint64, subject, reply string, data []byte, headers nats.Header) {
 	h.queueMsg(struct {
 		Type    string              `json:"type"`
 		SubID   uint64              `json:"subId"`
 		Subject string              `json:"subject"`
+		Reply   string              `json:"reply,omitempty"`
 		Data    string              `json:"data"`
 		Headers map[string][]string `json:"headers,omitempty"`
 		Ts      int64               `json:"ts"`
@@ -264,6 +265,7 @@ func (h *Hub) Message(subID uint64, subject string, data []byte, headers nats.He
 		Type:    "msg",
 		SubID:   subID,
 		Subject: subject,
+		Reply:   reply,
 		Data:    base64.StdEncoding.EncodeToString(data),
 		Headers: headers,
 		Ts:      time.Now().UnixMilli(),

@@ -190,40 +190,47 @@ export function deleteTemplate(name) {
 // ============================================================================
 // SAVED SUBSCRIPTIONS (per server URL)
 // ============================================================================
-// Map of { url: [{ subject, excludeSystem }] } - restored on connect.
+// Map of { url: [{ subject, queue, excludeSystem }] } - restored on connect.
 // Entries written before the excludeSystem option existed are bare strings;
-// they read back as "do not exclude", which is what they used to do.
+// they read back as "do not exclude", which is what they used to do. Entries
+// from before queue groups have no queue, which is the same as an empty one.
+//
+// A subscription is identified by subject AND queue: `orders.>` on its own
+// and `orders.>` in group "workers" are different subscriptions that deliver
+// different things, and both can exist at once.
 
 function normalizeSub(entry) {
-  if (typeof entry === "string") return { subject: entry, excludeSystem: false };
-  return { subject: entry.subject, excludeSystem: !!entry.excludeSystem };
+  if (typeof entry === "string") return { subject: entry, queue: "", excludeSystem: false };
+  return { subject: entry.subject, queue: entry.queue || "", excludeSystem: !!entry.excludeSystem };
 }
+
+const sameSub = (s, subject, queue) => s.subject === subject && s.queue === (queue || "");
 
 export function getSavedSubscriptions(url) {
   const all = loadJson(KEYS.SAVED_SUBS, {});
   return (all[url] || []).map(normalizeSub);
 }
 
-export function addSavedSubscription(url, subject, excludeSystem = false) {
+export function addSavedSubscription(url, subject, excludeSystem = false, queue = "") {
   if (!url || !subject) return;
   const all = loadJson(KEYS.SAVED_SUBS, {});
   const subs = (all[url] || []).map(normalizeSub);
 
-  // Same subject with a different filter setting replaces the old entry,
-  // so a re-subscribe is what gets restored next time
-  const existing = subs.find(s => s.subject === subject);
+  // Same subscription with a different filter setting replaces the old
+  // entry, so a re-subscribe is what gets restored next time
+  const existing = subs.find(s => sameSub(s, subject, queue));
   if (existing) existing.excludeSystem = !!excludeSystem;
-  else subs.push({ subject, excludeSystem: !!excludeSystem });
+  else subs.push({ subject, queue: queue || "", excludeSystem: !!excludeSystem });
 
   all[url] = subs.slice(-MAX_SAVED_SUBS_PER_SERVER);
   saveJson(KEYS.SAVED_SUBS, all);
 }
 
-export function removeSavedSubscription(url, subject) {
+export function removeSavedSubscription(url, subject, queue = "") {
   if (!url) return;
   const all = loadJson(KEYS.SAVED_SUBS, {});
   if (all[url]) {
-    all[url] = all[url].map(normalizeSub).filter(s => s.subject !== subject);
+    all[url] = all[url].map(normalizeSub).filter(s => !sameSub(s, subject, queue));
     if (all[url].length === 0) delete all[url];
     saveJson(KEYS.SAVED_SUBS, all);
   }

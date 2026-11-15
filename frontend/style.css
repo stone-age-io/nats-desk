@@ -795,11 +795,11 @@ button.disclosure.sm {
 }
 .chev { font-size: 0.6rem; }
 
-.copy-btn {
+.copy-btn, .msg-action {
   background: transparent; border: none; color: var(--muted-dim);
   cursor: pointer; padding: 2px 6px; font-size: 0.7rem; font-weight: 500;
 }
-.copy-btn:hover { color: var(--accent); background: rgba(88,166,255,0.1); border-color: transparent; }
+.copy-btn:hover, .msg-action:hover { color: var(--accent); background: rgba(88,166,255,0.1); border-color: transparent; }
 
 /* --------------------------------------------------------------------------
    COMPOSER
@@ -881,6 +881,7 @@ button.disclosure.sm {
 }
 .sub-add-row { display: flex; gap: var(--s2); }
 .sub-add-row input { margin: 0; min-width: 0; }
+#subQueue { width: 100%; }
 
 /* Tighter than the connection popover's check rows - this one sits in a
    cramped pane header, not a dialog */
@@ -897,6 +898,13 @@ button.disclosure.sm {
   text-transform: uppercase; white-space: nowrap;
   color: var(--muted); background: var(--border-soft);
   border-radius: 3px; padding: 1px 4px; vertical-align: 1px;
+}
+/* A queue group is a name the user typed, so it keeps its own case. Accent
+   coloured because it changes what arrives far more than "no sys" does: the
+   window gets a share of the traffic, not all of it. */
+.sub-tag-queue {
+  font-family: var(--mono); text-transform: none; letter-spacing: 0;
+  color: var(--accent); background: rgba(88,166,255,0.12);
 }
 
 /* Shared row style for bucket / key / stream lists */
@@ -980,6 +988,8 @@ button.disclosure.sm {
   display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap;
 }
 .msg-subject { color: #ddd; font-weight: 700; }
+.msg-reply { color: var(--muted); font-family: var(--mono); word-break: break-all; }
+.msg-actions { display: flex; gap: var(--s1); }
 
 /* Headers render as a name/value grid rather than a comma-joined line */
 .msg-headers { margin-top: var(--s1); font-size: 0.75em; color: var(--muted); }
