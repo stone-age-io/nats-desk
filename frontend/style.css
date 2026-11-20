@@ -458,21 +458,59 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
 /* A row we have stopped hearing from. It stays, because a grid that silently
    drops a line does not tell you a server went away. */
 .mon-table tbody tr.stale td { opacity: 0.45; }
-.mon-state { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.04em; }
-.mon-state.shutdown, .mon-state.stale { color: var(--danger); }
-.mon-state.lameduck { color: var(--warn); }
 
+/* The server grid fits its pane at the default column widths: eight columns,
+   with the state folded into a dot beside the name, and padding tight enough
+   that Mem is not the one scrolled out of view. It still scrolls sideways when
+   the pane is dragged narrower. */
+#monServerList .mon-table { min-width: 0; }
+#monServerList .mon-table th, #monServerList .mon-table td { padding-left: 6px; padding-right: 6px; }
+#monServerList .mon-table th:first-child, #monServerList .mon-table td:first-child { padding-left: var(--s3); }
+#monServerList .mon-table th:last-child, #monServerList .mon-table td:last-child { padding-right: var(--s3); }
+
+/* State, first in the row: the column that matters most was the last one, and
+   the first to scroll out of view. The words are in the tooltip. */
+.mon-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 7px; vertical-align: 1px;
+  background: var(--primary);
+}
+.mon-dot.lameduck { background: var(--warn); }
+.mon-dot.stale, .mon-dot.shutdown { background: var(--danger); }
+
+/* Endpoint, scope, source and when - so an answer from an earlier visit is
+   labelled as one. */
+.mon-meta { font-size: 0.7rem; color: var(--muted-dim); font-variant-numeric: tabular-nums; }
+
+.mon-answer-head {
+  position: sticky; top: 0; z-index: 1;
+  padding: var(--s1) var(--s3);
+  background: var(--panel); border-bottom: 1px solid var(--border-soft);
+  font-size: 0.72rem; font-weight: 600; color: var(--accent);
+}
+.mon-answer-err { padding: var(--s2) var(--s3) 0; font-size: 0.72rem; color: var(--danger); }
+
+/* Two lines: when, what and where on the first, who and why under it. On one
+   line the who - the part worth reading - was what got squeezed out in a
+   narrow pane, so it gets the full width and wraps rather than truncating. */
 .mon-event {
-  display: grid; grid-template-columns: 72px 130px 1fr; gap: var(--s2);
+  display: grid; grid-template-columns: 70px 74px minmax(0, 1fr);
+  column-gap: var(--s2); row-gap: 2px;
   padding: var(--s2) var(--s3); border-bottom: 1px solid var(--border-soft);
   font-size: 0.72rem; align-items: baseline;
 }
+.mon-event.expandable { cursor: pointer; }
+.mon-event.expandable:hover { background: var(--border-soft); }
 .mon-event .t { color: var(--muted); font-variant-numeric: tabular-nums; }
-.mon-event .k { font-weight: 600; }
+.mon-event .k { font-weight: 600; white-space: nowrap; }
 .mon-event .k.shutdown, .mon-event .k.auth_error { color: var(--danger); }
 .mon-event .k.lameduck { color: var(--warn); }
 .mon-event .k.client_connect { color: var(--primary); }
-.mon-event .d { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.mon-event .s { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-event .d { grid-column: 2 / -1; color: var(--text); overflow-wrap: anywhere; }
+.mon-event .r { color: var(--muted); }
+.mon-event .k.auth_error ~ .d .r { color: var(--danger); }
+.mon-event > .mon-json { grid-column: 1 / -1; padding: var(--s2) 0 0; overflow-x: auto; cursor: text; }
 
 .mon-json { margin: 0; padding: var(--s3); font-size: 0.72rem; line-height: 1.5; white-space: pre; }
 

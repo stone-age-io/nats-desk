@@ -472,6 +472,33 @@ the control path.** On a cluster with connection churn,
 which is a firehose by any other name. A grid update or a source going down is
 rare and must not be dropped.
 
+**An endpoint loads when it is picked, and picking a server only filters it.**
+There is no Load button: changing the endpoint or the source asks at once,
+opening the tab asks again, and ⟳ is the explicit re-ask. Every endpoint is a
+scatter-gather, so the answer already holds each server's reply, and the
+server picker (or a click on a grid row) filters it without a second request.
+Choices to keep:
+
+- The source picker offers only sources that can answer, and hides itself
+  when there is one. When the chosen source goes away the view moves to the
+  other one, or clears, rather than showing a cluster it can no longer see.
+- Answers are sorted by server name. They arrive in reply order, which moves a
+  server around between refreshes.
+- A `:8222` answer carries `server_id`/`server_name`, added by the backend
+  (`httpSource.identify`). healthz does not name its server, and it is the one
+  where "which server" matters most, so the ID last seen at that base fills in.
+- A stale answer for the same endpoint stays on screen while it refreshes,
+  under a meta line that says when it was asked. A different endpoint never
+  sits under a header naming the new one.
+- Disconnecting `$SYS` prunes only the rows `$SYS` supplied. It used to clear
+  the whole grid, which left it empty while `:8222` still saw every server.
+
+**An event row says who and why.** The backend always sent the whole event
+body; the row showed only the kind and the server. It now picks account, user,
+client name, IP and the disconnect reason out of the client block, on a second
+line so a narrow pane wraps it instead of truncating it, and a click expands
+the full event.
+
 **A context is edited as its own file, not through a form.** The settings
 struct has two dozen fields and grows with the CLI; a form would silently drop
 whatever it had not been taught about, so the dialog round-trips the file's raw
@@ -811,7 +838,8 @@ silently wrong: the subject filter rules, the KV operation mapping, KV write con
 request scatter-gather, dropping a replaced connection's status reports, the
 batching/drop accounting, the context editor's round-trip fidelity, creating
 a context (where its creds land, never overwriting, cleaning up), the
-monitoring rate arithmetic, the `natsdesk://` argument parsing, the token
+monitoring rate arithmetic, which server a `:8222` answer came from, the
+`natsdesk://` argument parsing, the token
 file's accept/reject rules, and the idle countdown quit-on-close relies on -
 that a reload survives it and turning it off cancels one already running.
 `TestDistIsCurrent` is not a logic test but a guard on the repository: it is

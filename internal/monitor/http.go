@@ -35,16 +35,30 @@ type httpSource struct {
 	bases  []string
 	client *http.Client
 	opts   HTTPOptions
+
+	// Which server was last seen answering at each base. See identify.
+	mu  sync.Mutex
+	ids map[string]serverIdent
+}
+
+type serverIdent struct {
+	ID   string `json:"server_id"`
+	Name string `json:"server_name"`
 }
 
 // HTTPResult is one server's answer. A failure is a value, not an error,
 // because "three of four nodes answered" is the interesting case and losing
 // the three to report the one would be the wrong trade.
 type HTTPResult struct {
-	Base   string          `json:"base"`
-	Status int             `json:"status,omitempty"`
-	Body   json.RawMessage `json:"body,omitempty"`
-	Error  string          `json:"error,omitempty"`
+	Base string `json:"base"`
+	// Which server answered, when that is known. It is what lets the UI match
+	// an answer to a row in the grid; a base URL alone names a port, not a
+	// server.
+	ServerID   string          `json:"server_id,omitempty"`
+	ServerName string          `json:"server_name,omitempty"`
+	Status     int             `json:"status,omitempty"`
+	Body       json.RawMessage `json:"body,omitempty"`
+	Error      string          `json:"error,omitempty"`
 }
 
 var ErrNoHTTPSource = errors.New("no monitoring URLs configured")
@@ -74,7 +88,7 @@ func (m *Monitor) SetHTTP(bases []string, opts HTTPOptions) error {
 	}
 
 	m.mu.Lock()
-	m.http = &httpSource{bases: clean, client: client, opts: opts}
+	m.http = &httpSource{bases: clean, client: client, opts: opts, ids: map[string]serverIdent{}}
 	m.mu.Unlock()
 
 	m.sink.MonitorStatus(m.Status())
@@ -125,6 +139,10 @@ func (m *Monitor) FetchHTTP(endpoint string, query url.Values) ([]HTTPResult, er
 	}
 	wg.Wait()
 
+	for i := range out {
+		src.identify(&out[i])
+	}
+
 	// A /varz answer is also a grid row, so the HTTP source populates the same
 	// table the $SYS source does.
 	if endpoint == "varz" {
@@ -147,6 +165,37 @@ func (m *Monitor) FetchHTTP(endpoint string, query url.Values) ([]HTTPResult, er
 	}
 
 	return out, nil
+}
+
+// identify names the server behind one answer.
+//
+// Most endpoints say so themselves - varz, connz, jsz, routez and the rest all
+// carry server_id - but healthz does not, and it is the one where "which
+// server is unhealthy" matters most. So every ID seen is remembered against
+// its base, and an answer that does not name its server gets the last one seen
+// there. varz is fetched whenever URLs are applied or the grid is refreshed, so
+// the gap is only ever a healthz asked of a base nothing has been asked yet.
+func (src *httpSource) identify(r *HTTPResult) {
+	var who serverIdent
+	if len(r.Body) > 0 {
+		_ = json.Unmarshal(r.Body, &who)
+	}
+
+	src.mu.Lock()
+	defer src.mu.Unlock()
+
+	known := src.ids[r.Base]
+	switch {
+	case who.ID == "":
+		who = known
+	case who.Name == "" && known.ID == who.ID:
+		// connz names the server by ID only; keep the name varz gave us.
+		who.Name = known.Name
+	}
+	if who.ID != "" {
+		src.ids[r.Base] = who
+	}
+	r.ServerID, r.ServerName = who.ID, who.Name
 }
 
 func (src *httpSource) get(base, endpoint string, query url.Values) HTTPResult {

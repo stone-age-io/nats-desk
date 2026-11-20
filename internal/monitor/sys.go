@@ -189,10 +189,12 @@ func (m *Monitor) DisconnectSys() {
 	}
 	s.nc.Close()
 
-	// The rows came from that connection; keeping them would show a cluster
-	// nats-desk can no longer see.
-	m.grid.reset()
-	m.sink.MonitorServers(nil)
+	// The rows that came from that connection go; keeping them would show a
+	// cluster nats-desk can no longer see. Rows the :8222 source supplied stay,
+	// because that source still sees them - clearing them too left the grid
+	// empty while the other source was working.
+	m.grid.prune(nil, "statsz", "ping")
+	m.sink.MonitorServers(m.grid.rowsSorted())
 	m.sink.MonitorStatus(m.Status())
 }
 

@@ -20,8 +20,8 @@
   <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="manifest" href="/manifest.json"/>
-  <script type="module" crossorigin src="/assets/index-CyuAe3F5.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-Daj_PAPz.css">
+  <script type="module" crossorigin src="/assets/index-B2aF6AJx.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BY_pbGRv.css">
 </head>
 <body data-conn="disconnected">
 
@@ -729,7 +729,7 @@
 
             <div class="subtab-panel" data-subtab-panel="server" role="tabpanel">
               <div class="mini-toolbar wrap">
-                <select id="monEndpoint" class="sm-input" aria-label="Monitoring endpoint">
+                <select id="monEndpoint" class="sm-select" aria-label="Monitoring endpoint">
                   <option value="varz">varz</option>
                   <option value="connz">connz</option>
                   <option value="jsz">jsz</option>
@@ -740,14 +740,18 @@
                   <option value="leafz">leafz</option>
                   <option value="gatewayz">gatewayz</option>
                 </select>
-                <select id="monEndpointVia" class="sm-input" aria-label="Which source to ask">
+                <select id="monEndpointScope" class="sm-select" aria-label="Which server's answer to show">
+                  <option value="">All servers</option>
+                </select>
+                <select id="monEndpointVia" class="sm-select" aria-label="Which source to ask">
                   <option value="sys">via $SYS</option>
                   <option value="http">via :8222</option>
                 </select>
-                <button id="btnMonEndpoint" class="sm-btn">Load</button>
+                <button id="btnMonEndpoint" class="sm-btn" title="Ask every server again">&#10227;</button>
               </div>
+              <div id="monEndpointMeta" class="mon-meta" hidden></div>
               <div id="monDetail" class="list-scroll">
-                <div class="empty">Select a server, or load an endpoint</div>
+                <div class="empty">Connect the system account, or add monitoring URLs, to ask the servers for these endpoints</div>
               </div>
             </div>
 
@@ -764,7 +768,7 @@
 
             <div class="subtab-panel" data-subtab-panel="account" role="tabpanel" hidden>
               <div class="mini-toolbar">
-                <button id="btnMonAccountLoad" class="sm-btn">&#10227; Load</button>
+                <button id="btnMonAccountLoad" class="sm-btn" title="Ask again">&#10227;</button>
               </div>
               <div id="monAccount" class="list-scroll">
                 <div class="empty">What your own account can see about itself</div>

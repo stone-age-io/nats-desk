@@ -78,7 +78,9 @@ export const els = {
   btnMonRefresh: $("btnMonRefresh"),
 
   monEndpoint: $("monEndpoint"),
+  monEndpointScope: $("monEndpointScope"),
   monEndpointVia: $("monEndpointVia"),
+  monEndpointMeta: $("monEndpointMeta"),
   btnMonEndpoint: $("btnMonEndpoint"),
   monDetail: $("monDetail"),
 

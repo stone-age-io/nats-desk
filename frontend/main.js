@@ -30,6 +30,11 @@ const DROP_REPORT_THROTTLE_MS = 3000;
 // Default RPC timeout in milliseconds
 const DEFAULT_RPC_TIMEOUT_MS = 2000;
 
+// Monitor wording, shared by more than one code path
+const VIA_LABELS = { sys: "via $SYS", http: "via :8222" };
+const ENDPOINT_NO_SOURCE = "Connect the system account, or add monitoring URLs, to ask the servers for these endpoints";
+const ACCOUNT_NOT_CONNECTED = "Connect to NATS to see what your account can see about itself";
+
 // ============================================================================
 // APPLICATION STATE
 // ============================================================================
@@ -97,6 +102,10 @@ const appState = {
   monitorStatus: null,
   monitorServers: [],
   monitorServer: null,
+  // The endpoint answer on screen: { key, via, name, at, answers | error, pending }
+  monitorEndpoint: null,
+  monitorEndpointSeq: 0,
+  monitorAccountSeq: 0,
 
   // Services: the last census, and what is selected in it. The backend keeps
   // nothing, so this is the only copy; servicesAt is null until a census has
@@ -222,6 +231,11 @@ function setupSubTabNavigation() {
       const btn = e.target.closest(".subtab");
       if (!btn) return;
       ui.switchSubTab(nav.dataset.subtabs, btn.dataset.subtab);
+
+      // Opening the account view is asking for it; there is no second step.
+      if (nav.dataset.subtabs === "monitor" && btn.dataset.subtab === "account") {
+        handleMonAccountLoad();
+      }
     });
   });
 }
@@ -457,6 +471,9 @@ function resetDataPanels() {
   els.streamEmptyState.hidden = false;
 
   resetServicesUi("Not connected");
+
+  // The account view describes the connection that just went away.
+  ui.setEmpty(els.monAccount, ACCOUNT_NOT_CONNECTED);
 }
 
 /**
@@ -601,6 +618,9 @@ async function connectNats() {
     );
     closeConnPopover();
     refreshMonitorStatus();
+    if (ui.getActiveTab() === "monitor" && activeMonitorSubtab() === "account") {
+      handleMonAccountLoad();
+    }
 
     await restoreSubscriptions(activeUrl);
 
@@ -1300,11 +1320,22 @@ function applyMonitorStatus(status) {
     const n = (http.bases || []).length;
     els.monHttpHint.textContent = `${n} monitoring URL${n === 1 ? "" : "s"}`;
   }
+
+  syncMonitorEndpoint();
 }
 
 function handleMonitorServers(rows) {
   appState.monitorServers = rows;
+
+  // A selected server that has gone - pruned by a census, or restarted under
+  // a new ID - leaves nothing to filter the answer down to.
+  if (appState.monitorServer && !rows.some((r) => r.id === appState.monitorServer)) {
+    appState.monitorServer = null;
+    renderMonitorEndpoint();
+  }
+
   ui.renderMonitorServers(rows, selectMonitorServer);
+  ui.renderMonitorScope(rows, appState.monitorServer);
   if (appState.monitorServer) ui.highlightMonitorServer(appState.monitorServer);
 
   // The grid arrives on its own - a server heartbeats, a row appears - so the
@@ -1331,11 +1362,29 @@ async function refreshMonitorStatus() {
   }
 }
 
+/** A row in the grid was clicked: show that server's answer. */
 function selectMonitorServer(row) {
-  appState.monitorServer = row.id;
-  ui.highlightMonitorServer(row.id);
-  ui.renderMonitorDetail(row);
   ui.switchSubTab("monitor", "server");
+  setMonitorScope(row.id);
+  const ep = appState.monitorEndpoint;
+  if (!ep || ep.key !== endpointKey(syncEndpointVia())) loadMonitorEndpoint();
+}
+
+/**
+ * Show one server's answer, or every server's for "".
+ *
+ * Every endpoint is a scatter-gather, so the answer already holds every
+ * server's reply and picking one only filters it - no second request.
+ */
+function setMonitorScope(id) {
+  appState.monitorServer = id || null;
+  ui.highlightMonitorServer(appState.monitorServer);
+  els.monEndpointScope.value = id || "";
+  renderMonitorEndpoint();
+}
+
+function activeMonitorSubtab() {
+  return document.querySelector('.subtabs[data-subtabs="monitor"] .subtab.active')?.dataset.subtab;
 }
 
 /**
@@ -1352,6 +1401,181 @@ async function loadMonitor() {
   } catch (err) {
     ui.showToast(err.message, "error");
   }
+
+  // Opening the tab asks again, so what it shows is current rather than
+  // whatever was asked on the last visit. A load the status sync above has
+  // just started is not repeated.
+  loadMonitorEndpoint();
+  if (activeMonitorSubtab() === "account") handleMonAccountLoad();
+}
+
+// ----------------------------------------------------------------------------
+// Endpoints: varz, connz and the rest, asked of every server at once.
+//
+// Choosing an endpoint, a source or a server shows the answer; there is no
+// Load button to press afterwards. ⟳ asks again.
+// ----------------------------------------------------------------------------
+
+/** Which sources can answer an endpoint right now. */
+function endpointSources() {
+  const st = appState.monitorStatus || {};
+  return { sys: !!(st.sys && st.sys.connected), http: !!(st.http && st.http.configured) };
+}
+
+/**
+ * Keep the source picker to sources that can answer, and return the one to
+ * ask - "" when neither can. A source that cannot answer is not offered,
+ * because picking it could only ever produce an error.
+ */
+function syncEndpointVia() {
+  const live = endpointSources();
+  const sel = els.monEndpointVia;
+  for (const opt of sel.options) opt.disabled = !live[opt.value];
+  if (!live[sel.value]) {
+    const other = [...sel.options].find((o) => live[o.value]);
+    if (other) sel.value = other.value;
+  }
+  // A choice of one is not a choice.
+  sel.hidden = !(live.sys && live.http);
+  return live[sel.value] ? sel.value : "";
+}
+
+function endpointKey(via) {
+  return `${via}:${els.monEndpoint.value}`;
+}
+
+/**
+ * Bring the endpoint view in line with the sources, whenever their status
+ * changes. This is also how a source that has just come up gets its first
+ * answer without anyone asking for it.
+ */
+function syncMonitorEndpoint() {
+  const via = syncEndpointVia();
+  if (!via) {
+    // The answer on screen came from a source that has gone, and keeping it
+    // would show a cluster nats-desk can no longer see.
+    if (appState.monitorEndpoint) {
+      appState.monitorEndpoint = null;
+      appState.monitorEndpointSeq++;
+    }
+    renderMonitorEndpoint();
+    return;
+  }
+  const shown = appState.monitorEndpoint;
+  if (ui.getActiveTab() === "monitor" && (!shown || shown.key !== endpointKey(via))) {
+    loadMonitorEndpoint();
+  }
+}
+
+/**
+ * One shape for both sources' answers, sorted by server name so a server
+ * keeps its place between refreshes; replies arrive in whatever order the
+ * servers answered. $SYS wraps each reply as {server, data, error}; :8222
+ * gives {base, body, error}, and the backend adds which server the base is.
+ */
+function normalizeAnswers(via, res) {
+  const list = Array.isArray(res) ? res : [];
+  const out = list.map((r) => {
+    if (via === "http") {
+      return {
+        id: r.server_id || "",
+        name: r.server_name || r.base,
+        title: r.base,
+        body: r.body ?? null,
+        error: r.error || "",
+      };
+    }
+    const s = r.server || {};
+    return {
+      id: s.id || "",
+      name: s.name || s.id || "?",
+      title: [s.id, s.ver && `v${s.ver}`].filter(Boolean).join(" · "),
+      body: r.data ?? null,
+      error: r.error ? r.error.description || `error ${r.error.code}` : "",
+    };
+  });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function loadMonitorEndpoint() {
+  const via = syncEndpointVia();
+  if (!via) {
+    syncMonitorEndpoint();
+    return;
+  }
+
+  const name = els.monEndpoint.value;
+  const key = endpointKey(via);
+  const prev = appState.monitorEndpoint;
+
+  // Already on its way: a second ⟳, or the tab opening just as a status
+  // change asked for the same thing.
+  if (prev && prev.key === key && prev.pending) return;
+
+  const seq = ++appState.monitorEndpointSeq;
+  const sameAnswer = !!(prev && prev.key === key && prev.answers);
+
+  // Refreshing the same answer leaves it on screen until the new one lands. A
+  // different endpoint must not sit under a header naming the new one.
+  appState.monitorEndpoint = sameAnswer ? { ...prev, pending: true } : { key, via, name, pending: true };
+  renderMonitorEndpoint();
+
+  let next;
+  try {
+    const res = via === "http"
+      ? await nats.getMonitorHttpEndpoint(name)
+      : await nats.getMonitorEndpoint(name);
+    next = { key, via, name, at: new Date(), answers: normalizeAnswers(via, res) };
+  } catch (err) {
+    next = { key, via, name, at: new Date(), error: err.message };
+  }
+
+  // Something newer was picked while this was out; that answer wins.
+  if (seq !== appState.monitorEndpointSeq) return;
+  appState.monitorEndpoint = next;
+  renderMonitorEndpoint({ keepScroll: sameAnswer });
+}
+
+function renderMonitorEndpoint({ keepScroll = false } = {}) {
+  const ep = appState.monitorEndpoint;
+  if (!ep) {
+    ui.renderMonitorEndpoint({ empty: ENDPOINT_NO_SOURCE });
+    return;
+  }
+  if (ep.error) {
+    ui.renderMonitorEndpoint({ empty: ep.error, isError: true });
+    return;
+  }
+  if (!ep.answers) {
+    ui.renderMonitorEndpoint({ empty: `Asking every server for ${ep.name}…` });
+    return;
+  }
+
+  const row = appState.monitorServer
+    ? appState.monitorServers.find((r) => r.id === appState.monitorServer)
+    : null;
+  const answers = row
+    ? ep.answers.filter((a) => (a.id ? a.id === row.id : a.name === row.name))
+    : ep.answers;
+
+  const n = ep.answers.length;
+  const meta = [
+    ep.name,
+    row ? row.name : `${n} server${n === 1 ? "" : "s"}`,
+    VIA_LABELS[ep.via],
+    ep.pending ? "asking…" : ep.at.toLocaleTimeString(),
+  ].join(" · ");
+
+  if (!answers.length) {
+    ui.renderMonitorEndpoint({
+      meta,
+      empty: row
+        ? `${row.name} is not among the servers that answered ${VIA_LABELS[ep.via]}`
+        : "No server answered",
+    });
+    return;
+  }
+  ui.renderMonitorEndpoint({ meta, answers, keepScroll: keepScroll || !!ep.pending });
 }
 
 async function handleMonitorRefresh() {
@@ -1400,8 +1624,13 @@ async function handleMonSysConnect() {
 
 async function handleMonSysDisconnect() {
   try {
-    applyMonitorStatus(await nats.disconnectMonitorSys());
-    handleMonitorServers([]);
+    const status = await nats.disconnectMonitorSys();
+    applyMonitorStatus(status);
+    // A server last heard from over $SYS has just left the grid even if :8222
+    // can see it, so ask :8222 for the grid rather than leaving it short.
+    handleMonitorServers(
+      status.http && status.http.configured ? await nats.refreshMonitorServers() : await nats.getMonitorServers()
+    );
     ui.showToast("System account disconnected", "info");
   } catch (err) {
     ui.showToast(err.message, "error");
@@ -1440,28 +1669,21 @@ async function handleMonHttpClear() {
   }
 }
 
-async function handleMonEndpoint() {
-  const name = els.monEndpoint.value;
-  const via = els.monEndpointVia.value;
-
-  ui.setEmpty(els.monDetail, `Asking every server for ${name}\u2026`);
-  try {
-    const res =
-      via === "http"
-        ? await nats.getMonitorHttpEndpoint(name)
-        : await nats.getMonitorEndpoint(name);
-    ui.renderJsonInto(els.monDetail, res);
-  } catch (err) {
-    ui.setEmpty(els.monDetail, err.message, true);
-  }
-}
-
 async function handleMonAccountLoad() {
+  // The account view rides on the app's own connection; without one it has
+  // nothing to ask, and an error saying so would read as something broken.
+  if (!nats.isConnected()) {
+    ui.setEmpty(els.monAccount, ACCOUNT_NOT_CONNECTED);
+    return;
+  }
+
+  const seq = ++appState.monitorAccountSeq;
   ui.setEmpty(els.monAccount, "Asking\u2026");
   try {
-    ui.renderJsonInto(els.monAccount, await nats.getMonitorAccount());
+    const view = await nats.getMonitorAccount();
+    if (seq === appState.monitorAccountSeq) ui.renderJsonInto(els.monAccount, view);
   } catch (err) {
-    ui.setEmpty(els.monAccount, err.message, true);
+    if (seq === appState.monitorAccountSeq) ui.setEmpty(els.monAccount, err.message, true);
   }
 }
 
@@ -1493,7 +1715,10 @@ els.btnMonSysConnect.addEventListener("click", handleMonSysConnect);
 els.btnMonSysDisconnect.addEventListener("click", handleMonSysDisconnect);
 els.btnMonHttpSave.addEventListener("click", handleMonHttpSave);
 els.btnMonHttpClear.addEventListener("click", handleMonHttpClear);
-els.btnMonEndpoint.addEventListener("click", handleMonEndpoint);
+els.btnMonEndpoint.addEventListener("click", () => loadMonitorEndpoint());
+els.monEndpoint.addEventListener("change", () => loadMonitorEndpoint());
+els.monEndpointVia.addEventListener("change", () => loadMonitorEndpoint());
+els.monEndpointScope.addEventListener("change", () => setMonitorScope(els.monEndpointScope.value));
 els.btnMonAccountLoad.addEventListener("click", handleMonAccountLoad);
 els.btnMonEventsClear.addEventListener("click", ui.clearMonitorEvents);
 els.monEventFilter.addEventListener("input", () =>

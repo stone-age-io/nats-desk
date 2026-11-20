@@ -2,8 +2,11 @@ package monitor
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -230,6 +233,47 @@ func TestSetHTTPRejectsBadCA(t *testing.T) {
 	err := m.SetHTTP([]string{"https://localhost:8222"}, HTTPOptions{CA: "this is not a certificate"})
 	if err == nil {
 		t.Fatal("accepted a CA that is not PEM")
+	}
+}
+
+// healthz is the one endpoint whose body does not name its server, and it is
+// the one where "which server is unhealthy" matters most. Its answer has to be
+// labelled with the server last seen at that base. connz names the server by
+// ID only, so it must keep the name varz supplied rather than dropping it.
+func TestHTTPAnswersNameTheirServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/varz":
+			fmt.Fprint(w, `{"server_id":"NABC","server_name":"n1","now":"2026-11-19T12:00:00Z"}`)
+		case "/connz":
+			fmt.Fprint(w, `{"server_id":"NABC","num_connections":0}`)
+		case "/healthz":
+			fmt.Fprint(w, `{"status":"ok"}`)
+		}
+	}))
+	defer srv.Close()
+
+	m := New(nil, &fakeSink{}, discard())
+	if err := m.SetHTTP([]string{srv.URL}, HTTPOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	ask := func(endpoint string) HTTPResult {
+		t.Helper()
+		out, err := m.FetchHTTP(endpoint, nil)
+		if err != nil || len(out) != 1 {
+			t.Fatalf("%s: %v, %d results", endpoint, err, len(out))
+		}
+		return out[0]
+	}
+
+	if r := ask("healthz"); r.ServerID != "" {
+		t.Errorf("healthz before anything named the server: id = %q, want none", r.ServerID)
+	}
+	for _, endpoint := range []string{"varz", "connz", "healthz"} {
+		if r := ask(endpoint); r.ServerID != "NABC" || r.ServerName != "n1" {
+			t.Errorf("%s: server = %q/%q, want NABC/n1", endpoint, r.ServerID, r.ServerName)
+		}
 	}
 }
 

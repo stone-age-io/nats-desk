@@ -1405,6 +1405,21 @@ function rate(v) {
   return v.toFixed(1);
 }
 
+/**
+ * What a row's state dot means, in words, for its tooltip and for a screen
+ * reader. The dot sits first in the row because state is the column that
+ * matters most, and as the last column it was the first to scroll out of view.
+ */
+function serverState(r, now) {
+  if (r.state === "shutdown") return { cls: "shutdown", text: "Shut down" };
+  if (r.state === "lameduck") return { cls: "lameduck", text: "Entering lame duck mode" };
+  const quiet = now - new Date(r.seen).getTime();
+  if (quiet > STALE_AFTER_MS) {
+    return { cls: "stale", text: `No report for ${Math.round(quiet / 1000)}s` };
+  }
+  return { cls: "ok", text: "Reporting" };
+}
+
 export function renderMonitorServers(rows, onSelect) {
   els.monServerCount.textContent = `(${rows.length})`;
 
@@ -1418,30 +1433,30 @@ export function renderMonitorServers(rows, onSelect) {
   table.className = "mon-table";
   table.innerHTML =
     "<thead><tr>" +
-    ["Server", "Cluster", "Conns", "Subs", "In/s", "Out/s", "CPU", "Mem", "Version", ""]
-      .map((h, i) => `<th${i >= 2 && i <= 7 ? ' class="num"' : ""}>${h}</th>`)
+    ["Server", "Cluster", "Conns", "Subs", "In/s", "Out/s", "CPU", "Mem"]
+      .map((h, i) => `<th${i >= 2 ? ' class="num"' : ""}>${h}</th>`)
       .join("") +
     "</tr></thead>";
 
   const body = document.createElement("tbody");
   for (const r of rows) {
-    const stale = now - new Date(r.seen).getTime() > STALE_AFTER_MS;
-    const state = r.state || (stale ? "stale" : "");
+    const st = serverState(r, now);
+    const tip = [r.name, `${r.host} · v${r.version}`, st.text].join("\n");
 
     const tr = document.createElement("tr");
     tr.dataset.id = r.id;
-    if (stale) tr.classList.add("stale");
+    if (st.cls === "stale") tr.classList.add("stale");
     tr.innerHTML =
-      `<td class="name" title="${utils.escapeHtml(r.name)}">${utils.escapeHtml(r.name)}</td>` +
+      `<td class="name" title="${utils.escapeHtml(tip)}">` +
+      `<span class="mon-dot ${st.cls}" role="img" aria-label="${utils.escapeHtml(st.text)}"></span>` +
+      `${utils.escapeHtml(r.name)}</td>` +
       `<td>${utils.escapeHtml(r.cluster || "-")}</td>` +
       `<td class="num">${r.connections}</td>` +
       `<td class="num">${r.subscriptions}</td>` +
       `<td class="num">${rate(r.in_msgs_rate)}</td>` +
       `<td class="num">${rate(r.out_msgs_rate)}</td>` +
       `<td class="num">${r.cpu.toFixed(0)}%</td>` +
-      `<td class="num">${utils.formatBytes(r.mem, 0)}</td>` +
-      `<td>${utils.escapeHtml(r.version)}</td>` +
-      `<td><span class="mon-state ${state}">${state}</span></td>`;
+      `<td class="num">${utils.formatBytes(r.mem, 0)}</td>`;
     tr.addEventListener("click", () => onSelect(r));
     body.append(tr);
   }
@@ -1456,12 +1471,70 @@ export function highlightMonitorServer(id) {
   });
 }
 
-export function renderMonitorDetail(row) {
-  if (!row) {
-    setEmpty(els.monDetail, "Select a server, or load an endpoint");
+let monScopeKey = "";
+
+/**
+ * The server picker beside the endpoint picker. The grid re-renders on every
+ * heartbeat, and rebuilding an open <select> under the user would close it, so
+ * the options are only rebuilt when the set of servers actually changes.
+ */
+export function renderMonitorScope(rows, selectedId) {
+  const key = rows.map((r) => `${r.id}\u0000${r.name}`).join("\u0001");
+  if (key !== monScopeKey) {
+    monScopeKey = key;
+    const all = new Option("All servers", "");
+    const byName = [...rows].sort((a, b) => a.name.localeCompare(b.name));
+    els.monEndpointScope.replaceChildren(all, ...byName.map((r) => new Option(r.name, r.id)));
+  }
+  els.monEndpointScope.value = selectedId || "";
+}
+
+/**
+ * Draw an endpoint's answers, or the reason there are none.
+ *
+ * @param {object} view
+ * @param {string} [view.empty]   why there is nothing to show; wins over the rest
+ * @param {boolean} [view.isError]
+ * @param {string} view.meta      the line above: endpoint, scope, source, time
+ * @param {Array<{name: string, title: string, body: any, error: string}>} view.answers
+ * @param {boolean} view.keepScroll  the same answer refreshed, so stay put
+ */
+export function renderMonitorEndpoint(view) {
+  els.monEndpointMeta.hidden = !view.meta;
+  els.monEndpointMeta.textContent = view.meta || "";
+
+  if (view.empty) {
+    setEmpty(els.monDetail, view.empty, view.isError);
     return;
   }
-  renderJsonInto(els.monDetail, row);
+
+  const top = els.monDetail.scrollTop;
+  const single = view.answers.length === 1;
+  const parts = [];
+  for (const a of view.answers) {
+    // One server needs no heading: the meta line already names it.
+    if (!single) {
+      const head = document.createElement("div");
+      head.className = "mon-answer-head";
+      head.textContent = a.name;
+      head.title = a.title;
+      parts.push(head);
+    }
+    if (a.error) {
+      const err = document.createElement("div");
+      err.className = "mon-answer-err";
+      err.textContent = a.error;
+      parts.push(err);
+    }
+    if (a.body != null) {
+      const pre = document.createElement("pre");
+      pre.className = "mon-json";
+      pre.innerHTML = utils.syntaxHighlight(a.body);
+      parts.push(pre);
+    }
+  }
+  els.monDetail.replaceChildren(...parts);
+  if (view.keepScroll) els.monDetail.scrollTop = top;
 }
 
 export function renderJsonInto(el, value) {
@@ -1473,18 +1546,69 @@ export function renderJsonInto(el, value) {
 
 let monEventCount = 0;
 
+const EVENT_LABELS = {
+  client_connect: "connect",
+  client_disconnect: "disconnect",
+  auth_error: "auth error",
+  shutdown: "shutdown",
+  lameduck: "lame duck",
+};
+
+/**
+ * Who an event is about, from the client block the server puts in connect,
+ * disconnect and auth-error events. Kind and transport only show when they
+ * are not the ordinary case, so a leaf node or a websocket client stands out.
+ */
+function eventWho(client) {
+  if (!client) return "";
+  const parts = [];
+  if (client.acc) parts.push(client.acc);
+  if (client.user) parts.push(client.user);
+  if (client.name) parts.push(`"${client.name}"`);
+  if (client.host) parts.push(client.host);
+  if (client.kind && client.kind !== "Client") parts.push(client.kind.toLowerCase());
+  if (client.client_type && client.client_type !== "nats") parts.push(client.client_type);
+  return parts.join(" · ");
+}
+
 export function appendMonitorEvent(ev) {
   if (monEventCount === 0) els.monEvents.replaceChildren();
+
+  const data = ev.data && typeof ev.data === "object" ? ev.data : null;
+  const who = eventWho(data?.client);
+  const reason = data?.reason || "";
 
   const row = document.createElement("div");
   row.className = "mon-event";
   const when = new Date(ev.at).toLocaleTimeString();
-  const where = ev.server || ev.subject || "";
   row.innerHTML =
     `<span class="t">${utils.escapeHtml(when)}</span>` +
-    `<span class="k ${ev.kind}">${utils.escapeHtml(ev.kind)}</span>` +
-    `<span class="d">${utils.escapeHtml(where)}</span>`;
+    `<span class="k ${ev.kind}">${utils.escapeHtml(EVENT_LABELS[ev.kind] || ev.kind)}</span>` +
+    `<span class="s" title="${utils.escapeHtml(ev.server_id || "")}">${utils.escapeHtml(ev.server || "")}</span>` +
+    (who || reason
+      ? `<span class="d">${utils.escapeHtml(who)}` +
+        (reason ? ` <span class="r">— ${utils.escapeHtml(reason)}</span>` : "") +
+        `</span>`
+      : "");
   row.title = ev.subject;
+
+  // The whole event, on demand. The row only picks out who and why.
+  if (data) {
+    row.classList.add("expandable");
+    row.addEventListener("click", (e) => {
+      // Selecting text in the open event is not a request to close it.
+      if (e.target.closest(".mon-json") || String(window.getSelection())) return;
+      const open = row.querySelector(":scope > .mon-json");
+      if (open) {
+        open.remove();
+        return;
+      }
+      const pre = document.createElement("pre");
+      pre.className = "mon-json";
+      pre.innerHTML = utils.syntaxHighlight(data);
+      row.append(pre);
+    });
+  }
 
   els.monEvents.prepend(row);
   monEventCount++;

@@ -268,10 +268,3 @@ func (g *grid) rowsSorted() []ServerRow {
 	})
 	return out
 }
-
-func (g *grid) reset() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.rows = map[string]ServerRow{}
-	g.last = map[string]sample{}
-}
