@@ -43,10 +43,14 @@ type sysConn struct {
 	live *serverdata.Live
 	subs []*nats.Subscription
 	url  string
+	// The NATS CLI context it came from, or "" for manual settings.
+	context string
 }
 
-// connectSys opens the system-account connection and starts listening.
-func (m *Monitor) ConnectSys(url string, opts []nats.Option) error {
+// ConnectSys opens the system-account connection and starts listening.
+// contextName names the NATS CLI context the URL and options came from, for
+// display only; it is "" when they were typed in.
+func (m *Monitor) ConnectSys(url string, opts []nats.Option, contextName string) error {
 	m.DisconnectSys()
 
 	all := make([]nats.Option, 0, len(opts)+4)
@@ -85,7 +89,7 @@ func (m *Monitor) ConnectSys(url string, opts []nats.Option) error {
 		return err
 	}
 
-	s := &sysConn{nc: nc, live: live, url: url}
+	s := &sysConn{nc: nc, live: live, url: url, context: contextName}
 	if err := m.subscribeEvents(s); err != nil {
 		nc.Close()
 		return fmt.Errorf("system account connected but its events are not readable: %w", err)

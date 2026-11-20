@@ -492,6 +492,36 @@ Choices to keep:
   sits under a header naming the new one.
 - Disconnecting `$SYS` prunes only the rows `$SYS` supplied. It used to clear
   the whole grid, which left it empty while `:8222` still saw every server.
+  Clearing `:8222` does the same the other way round; its rows used to stay
+  in the grid as if still watched.
+
+**All servers get a summary line each; one server gets a card.** Above an
+all-servers answer, `ENDPOINT_SUMMARY` in `ui.js` picks per endpoint the few
+fields worth comparing across servers: a different version, a failed health
+check, the meta leader. Clicking a line selects that server. A selected
+server instead gets a card built from its grid row, which re-renders on every
+heartbeat and so stays live, unlike the answer below it. Choices to keep:
+
+- Neither shows a route *count*. Route pooling (three connections per peer
+  by default since 2.10) makes a three-node cluster report 8. The routez line
+  shows peers next to route connections, so the 8 is explained where it
+  appears.
+- The connz line says how many of the total this answer lists. connz answers
+  one page of 1024 by default, and a page must not read as everything.
+- The card's uptime is the server's `seen` minus its `start`, both server
+  timestamps, so local clock skew cannot touch it.
+- A summary line for a server the grid does not know cannot be clicked,
+  because there would be no row to filter to.
+
+**A source that is set up collapses to one line.** The system-account card
+shows the context name, or the host when there is none, with the server
+count and Disconnect. The `:8222` card shows the first URL and how many more,
+with Edit and Clear. The forms used to fill the panel for the life of the
+connection while none of their fields did anything. The status carries the
+context name and the `:8222` insecure flag, so every window shows the same
+thing, and "TLS not verified" stays visible on the collapsed card. Edit
+reopens the form on the URLs actually in use, not on leftover edits, and only
+a URL the backend accepts collapses it again.
 
 **An event row says who and why.** The backend always sent the whole event
 body; the row showed only the kind and the server. It now picks account, user,

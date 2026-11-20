@@ -106,6 +106,8 @@ const appState = {
   monitorEndpoint: null,
   monitorEndpointSeq: 0,
   monitorAccountSeq: 0,
+  // The :8222 card is open for editing although a source is in use
+  monitorHttpEditing: false,
 
   // Services: the last census, and what is selected in it. The backend keeps
   // nothing, so this is the only copy; servicesAt is null until a census has
@@ -1301,27 +1303,68 @@ async function handleContextDefault() {
 function applyMonitorStatus(status) {
   appState.monitorStatus = status;
   ui.setMonitorSources(status);
+  renderSourceCards(status);
+  syncMonitorEndpoint();
+}
 
+/** "127.0.0.1:4322" out of "nats://127.0.0.1:4322", or the input if it will not parse. */
+function hostOf(url) {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * A source that is set up shows one line - what it is connected to - and the
+ * way to stop, instead of the form that set it up. The form took most of the
+ * panel's height for the life of the connection while every field in it did
+ * nothing.
+ */
+function renderSourceCards(status) {
   const sys = (status && status.sys) || {};
-  els.btnMonSysConnect.hidden = !!sys.connected;
-  els.btnMonSysDisconnect.hidden = !sys.connected;
-
-  els.monSysHint.hidden = !sys.configured;
-  els.monSysHint.classList.toggle("bad", sys.configured && !sys.connected);
+  els.monSysForm.hidden = !!sys.configured;
+  els.monSysSummary.hidden = !sys.configured;
   if (sys.configured) {
-    els.monSysHint.textContent = sys.connected
-      ? `${sys.url} \u00b7 ${sys.servers || 0} server${sys.servers === 1 ? "" : "s"}`
-      : `${sys.url} \u00b7 not connected`;
+    const n = sys.servers || 0;
+    const label = sys.context || hostOf(sys.url);
+    els.monSysSummaryText.textContent = sys.connected
+      ? `${label} \u00b7 ${n} server${n === 1 ? "" : "s"}`
+      : `${label} \u00b7 reconnecting\u2026`;
+    els.monSysSummaryText.title = sys.url;
+    els.monSysSummaryText.classList.toggle("bad", !sys.connected);
   }
 
   const http = (status && status.http) || {};
-  els.monHttpHint.hidden = !http.configured;
+  if (!http.configured) appState.monitorHttpEditing = false;
+  const collapsed = !!http.configured && !appState.monitorHttpEditing;
+  els.monHttpForm.hidden = collapsed;
+  els.monHttpSummary.hidden = !collapsed;
+  els.btnMonHttpCancel.hidden = !http.configured;
   if (http.configured) {
-    const n = (http.bases || []).length;
-    els.monHttpHint.textContent = `${n} monitoring URL${n === 1 ? "" : "s"}`;
+    const bases = http.bases || [];
+    const more = bases.length > 1 ? ` +${bases.length - 1}` : "";
+    els.monHttpSummaryText.textContent =
+      `${hostOf(bases[0] || "")}${more}` + (http.insecure ? " \u00b7 TLS not verified" : "");
+    els.monHttpSummaryText.title = bases.join("\n");
+    els.monHttpSummaryText.classList.toggle("warn", !!http.insecure);
   }
+}
 
-  syncMonitorEndpoint();
+/** Reopen the :8222 form on what is actually in use, not on stale edits. */
+function handleMonHttpEdit() {
+  const http = (appState.monitorStatus && appState.monitorStatus.http) || {};
+  els.monHttpBases.value = (http.bases || []).join("\n");
+  els.monHttpInsecure.checked = !!http.insecure;
+  appState.monitorHttpEditing = true;
+  renderSourceCards(appState.monitorStatus);
+  els.monHttpBases.focus();
+}
+
+function handleMonHttpCancel() {
+  appState.monitorHttpEditing = false;
+  renderSourceCards(appState.monitorStatus);
 }
 
 function handleMonitorServers(rows) {
@@ -1336,6 +1379,7 @@ function handleMonitorServers(rows) {
 
   ui.renderMonitorServers(rows, selectMonitorServer);
   ui.renderMonitorScope(rows, appState.monitorServer);
+  renderMonitorServerCard();
   if (appState.monitorServer) ui.highlightMonitorServer(appState.monitorServer);
 
   // The grid arrives on its own - a server heartbeats, a row appears - so the
@@ -1380,6 +1424,7 @@ function setMonitorScope(id) {
   appState.monitorServer = id || null;
   ui.highlightMonitorServer(appState.monitorServer);
   els.monEndpointScope.value = id || "";
+  renderMonitorServerCard();
   renderMonitorEndpoint();
 }
 
@@ -1575,7 +1620,45 @@ function renderMonitorEndpoint({ keepScroll = false } = {}) {
     });
     return;
   }
-  ui.renderMonitorEndpoint({ meta, answers, keepScroll: keepScroll || !!ep.pending });
+
+  // Every server at once gets a line each to compare. One server needs no
+  // summary line: the card above already says how it is doing.
+  const spec = !row && ui.ENDPOINT_SUMMARY[ep.name];
+  const summary = spec && {
+    cols: spec.cols,
+    rows: answers.map((a) => ({
+      rowId: gridRowFor(a),
+      name: a.name,
+      title: a.title,
+      error: a.error,
+      cells: a.body && typeof a.body === "object" ? spec.row(a.body) : null,
+    })),
+  };
+
+  ui.renderMonitorEndpoint({
+    meta,
+    answers,
+    summary,
+    onSelect: setMonitorScope,
+    keepScroll: keepScroll || !!ep.pending,
+  });
+}
+
+/** The grid row an answer came from: by ID, or by name for a reply that carried none. */
+function gridRowFor(answer) {
+  const rows = appState.monitorServers;
+  const hit = answer.id
+    ? rows.find((r) => r.id === answer.id)
+    : rows.find((r) => r.name === answer.name);
+  return hit ? hit.id : null;
+}
+
+/** The selected server's card, redrawn on every heartbeat so it stays live. */
+function renderMonitorServerCard() {
+  const row = appState.monitorServer
+    ? appState.monitorServers.find((r) => r.id === appState.monitorServer)
+    : null;
+  ui.renderMonitorServerCard(row, () => setMonitorScope(""));
 }
 
 async function handleMonitorRefresh() {
@@ -1644,9 +1727,11 @@ async function handleMonHttpSave() {
     .filter(Boolean);
 
   try {
-    applyMonitorStatus(
-      await nats.setMonitorHttp({ bases, insecure: els.monHttpInsecure.checked })
-    );
+    const status = await nats.setMonitorHttp({ bases, insecure: els.monHttpInsecure.checked });
+    // Only a source the backend accepted collapses the card. A refused URL
+    // leaves the form open on the text that needs fixing.
+    appState.monitorHttpEditing = false;
+    applyMonitorStatus(status);
     storage.setMonitorHttp({ bases, insecure: els.monHttpInsecure.checked });
 
     // Fetching varz is also what populates the grid from this source, so a
@@ -1661,8 +1746,14 @@ async function handleMonHttpSave() {
 
 async function handleMonHttpClear() {
   try {
-    applyMonitorStatus(await nats.clearMonitorHttp());
+    const status = await nats.clearMonitorHttp();
+    applyMonitorStatus(status);
     storage.setMonitorHttp(null);
+    // The same as a $SYS disconnect the other way round: rows :8222 supplied
+    // have gone, and $SYS may still see some of those servers.
+    handleMonitorServers(
+      status.sys && status.sys.connected ? await nats.refreshMonitorServers() : await nats.getMonitorServers()
+    );
     ui.showToast("Monitoring URLs cleared", "info");
   } catch (err) {
     ui.showToast(err.message, "error");
@@ -1715,6 +1806,8 @@ els.btnMonSysConnect.addEventListener("click", handleMonSysConnect);
 els.btnMonSysDisconnect.addEventListener("click", handleMonSysDisconnect);
 els.btnMonHttpSave.addEventListener("click", handleMonHttpSave);
 els.btnMonHttpClear.addEventListener("click", handleMonHttpClear);
+els.btnMonHttpEdit.addEventListener("click", handleMonHttpEdit);
+els.btnMonHttpCancel.addEventListener("click", handleMonHttpCancel);
 els.btnMonEndpoint.addEventListener("click", () => loadMonitorEndpoint());
 els.monEndpoint.addEventListener("change", () => loadMonitorEndpoint());
 els.monEndpointVia.addEventListener("change", () => loadMonitorEndpoint());

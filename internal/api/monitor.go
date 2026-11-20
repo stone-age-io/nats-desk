@@ -75,7 +75,7 @@ func (a *API) monitorConnectSys(w http.ResponseWriter, r *http.Request) {
 			fail(w, err)
 			return
 		}
-		if err := a.mon.ConnectSys(url, opts); err != nil {
+		if err := a.mon.ConnectSys(url, opts, req.Context); err != nil {
 			fail(w, err)
 			return
 		}
@@ -103,7 +103,7 @@ func (a *API) monitorConnectSys(w http.ResponseWriter, r *http.Request) {
 	if opt != nil {
 		opts = append(opts, opt)
 	}
-	if err := a.mon.ConnectSys(req.URL, opts); err != nil {
+	if err := a.mon.ConnectSys(req.URL, opts, ""); err != nil {
 		fail(w, err)
 		return
 	}

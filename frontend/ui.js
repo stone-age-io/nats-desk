@@ -1471,6 +1471,215 @@ export function highlightMonitorServer(id) {
   });
 }
 
+function chip(label, value, hot = false) {
+  const el = document.createElement("span");
+  el.className = "meta-chip" + (hot ? " hot" : "");
+  const k = document.createElement("span");
+  k.textContent = `${label} `;
+  const v = document.createElement("b");
+  v.textContent = value;
+  el.append(k, v);
+  return el;
+}
+
+/** A per-second rate, with its byte rate when there is one. "-" before the second sample. */
+function rateChip(label, msgs, bytes) {
+  if (msgs == null) return chip(label, "-");
+  const b = bytes == null ? "" : ` · ${utils.formatBytes(bytes, 0)}/s`;
+  return chip(label, `${rate(msgs)} msg/s${b}`);
+}
+
+/**
+ * The selected server, from its grid row: who it is and how it is doing, in
+ * place of the row's raw JSON. It re-renders on every heartbeat.
+ *
+ * Routes are left out on purpose. A row counts route *connections*, and with
+ * route pooling (three per peer by default since 2.10) a three-node cluster
+ * reports 8 - a number that reads as wrong when it is not.
+ *
+ * @param {object|null} r       the grid row, or null to hide the card
+ * @param {() => void} onClear  back to every server
+ */
+export function renderMonitorServerCard(r, onClear) {
+  if (!r) {
+    els.monServerCard.hidden = true;
+    els.monServerCard.replaceChildren();
+    return;
+  }
+
+  const st = serverState(r, Date.now());
+  // Both ends of uptime are the server's own timestamps, so a skewed local
+  // clock cannot distort it.
+  const up = utils.formatAge(new Date(r.seen) - new Date(r.start));
+
+  const head = document.createElement("div");
+  head.className = "mon-card-head";
+  head.innerHTML =
+    `<span class="mon-card-name"><span class="mon-dot ${st.cls}" aria-hidden="true"></span>${utils.escapeHtml(r.name)}</span>` +
+    `<span class="mon-card-sub" title="${utils.escapeHtml(r.id)}">` +
+    utils.escapeHtml([r.cluster, `v${r.version}`, r.host, `up ${up}`].filter(Boolean).join(" · ")) +
+    `</span>` +
+    `<span class="mon-card-state ${st.cls}">${utils.escapeHtml(st.text)}</span>`;
+  const close = document.createElement("button");
+  close.className = "sm-btn";
+  close.textContent = "×";
+  close.title = "Show every server";
+  close.addEventListener("click", onClear);
+  head.append(close);
+
+  const chips = document.createElement("div");
+  chips.className = "svc-meta";
+  chips.append(
+    chip("conns", r.connections.toLocaleString()),
+    chip("subs", r.subscriptions.toLocaleString()),
+    chip("slow", r.slow_consumers.toLocaleString(), r.slow_consumers > 0),
+    rateChip("in", r.in_msgs_rate, r.in_bytes_rate),
+    rateChip("out", r.out_msgs_rate, r.out_bytes_rate),
+    chip("cpu", `${r.cpu.toFixed(0)}% of ${r.cores} cores`),
+    chip("mem", utils.formatBytes(r.mem, 0)),
+    chip("JetStream", r.jetstream ? "on" : "off"),
+  );
+
+  els.monServerCard.replaceChildren(head, chips);
+  els.monServerCard.hidden = false;
+}
+
+// ----------------------------------------------------------------------------
+// One line per server above an all-servers answer. Each endpoint gets the few
+// fields worth comparing across servers - a different version, a server whose
+// health check failed, the one meta leader - which the raw replies below bury
+// a screen apart. A cell is a string, or { text, cls } to colour it.
+// ----------------------------------------------------------------------------
+
+const num = (v) => (v == null ? "-" : Number(v).toLocaleString());
+const yesNo = (v) => (v ? "yes" : "no");
+
+export const ENDPOINT_SUMMARY = {
+  varz: {
+    cols: ["Version", "Uptime", "Slow", "Auth", "TLS", "JetStream"],
+    row: (b) => [
+      b.version || "-",
+      b.uptime || "-",
+      { text: num(b.slow_consumers), cls: b.slow_consumers > 0 ? "hot" : "" },
+      yesNo(b.auth_required),
+      yesNo(b.tls_required),
+      yesNo(b.jetstream && b.jetstream.config),
+    ],
+  },
+  connz: {
+    // connz answers one page, 1024 connections by default. Saying how many of
+    // the total this answer lists is what stops a page reading as everything.
+    cols: ["Connections", "Listed"],
+    row: (b) => [
+      num(b.total),
+      b.num_connections < b.total
+        ? { text: `${num(b.num_connections)} of ${num(b.total)}`, cls: "warn" }
+        : num(b.num_connections),
+    ],
+  },
+  jsz: {
+    cols: ["Streams", "Consumers", "Messages", "Stored", "Meta leader"],
+    row: (b) =>
+      b.disabled || !b.config
+        ? [{ text: "JetStream off", cls: "warn" }, "-", "-", "-", "-"]
+        : [
+            num(b.streams),
+            num(b.consumers),
+            num(b.messages),
+            utils.formatBytes(b.bytes || 0, 0),
+            (b.meta_cluster && b.meta_cluster.leader) || "-",
+          ],
+  },
+  healthz: {
+    cols: ["Status", "Detail"],
+    row: (b) => [
+      { text: b.status || "-", cls: b.status === "ok" ? "good" : "hot" },
+      {
+        text: b.error || (b.errors || []).map((e) => e.error).filter(Boolean).join("; ") || "",
+        cls: "wrap",
+      },
+    ],
+  },
+  routez: {
+    // Peers, not routes: a pool of route connections goes to each peer, so the
+    // connection count alone overstates the cluster.
+    cols: ["Peers", "Route connections"],
+    row: (b) => [
+      num(new Set((b.routes || []).map((r) => r.remote_name || r.remote_id)).size),
+      num(b.num_routes),
+    ],
+  },
+  subsz: {
+    cols: ["Subscriptions", "Matches", "Cache hit", "Max fanout"],
+    row: (b) => [
+      num(b.num_subscriptions),
+      num(b.num_matches),
+      b.cache_hit_rate == null ? "-" : `${(b.cache_hit_rate * 100).toFixed(0)}%`,
+      num(b.max_fanout),
+    ],
+  },
+  accountz: {
+    cols: ["Accounts", "System account"],
+    row: (b) => [num((b.accounts || []).length), b.system_account || "-"],
+  },
+  leafz: {
+    cols: ["Leaf nodes", "Remotes"],
+    row: (b) => [
+      num(b.leafnodes),
+      {
+        text: (b.leafs || []).map((l) => l.name || `${l.account}@${l.ip}`).join(", ") || "-",
+        cls: "wrap",
+      },
+    ],
+  },
+  gatewayz: {
+    cols: ["Gateway", "Outbound", "Inbound"],
+    row: (b) => [
+      b.name || "-",
+      num(Object.keys(b.outbound_gateways || {}).length),
+      num(Object.keys(b.inbound_gateways || {}).length),
+    ],
+  },
+};
+
+/**
+ * @param {{cols: string[], rows: Array<{rowId: string|null, name: string, title: string,
+ *          cells: Array<string|{text: string, cls: string}>|null, error: string}>}} summary
+ * @param {(rowId: string) => void} onSelect
+ */
+function summaryTable(summary, onSelect) {
+  const table = document.createElement("table");
+  table.className = "mon-table mon-summary";
+  table.innerHTML =
+    "<thead><tr>" +
+    ["Server", ...summary.cols].map((h) => `<th>${utils.escapeHtml(h)}</th>`).join("") +
+    "</tr></thead>";
+
+  const body = document.createElement("tbody");
+  for (const r of summary.rows) {
+    const tr = document.createElement("tr");
+    let html = `<td class="name" title="${utils.escapeHtml(r.title)}">${utils.escapeHtml(r.name)}</td>`;
+    if (r.error || !r.cells) {
+      html += `<td class="err" colspan="${summary.cols.length}">${utils.escapeHtml(r.error || "no answer")}</td>`;
+    } else {
+      html += r.cells
+        .map((c) => {
+          const cell = typeof c === "object" && c ? c : { text: c, cls: "" };
+          return `<td class="${cell.cls || ""}">${utils.escapeHtml(String(cell.text))}</td>`;
+        })
+        .join("");
+    }
+    tr.innerHTML = html;
+    // A server the grid does not know cannot be selected: there is no row to
+    // filter to, and a click that did nothing would look broken.
+    if (r.rowId) tr.addEventListener("click", () => onSelect(r.rowId));
+    else tr.classList.add("unselectable");
+    body.append(tr);
+  }
+  table.append(body);
+  return table;
+}
+
 let monScopeKey = "";
 
 /**
@@ -1497,6 +1706,8 @@ export function renderMonitorScope(rows, selectedId) {
  * @param {boolean} [view.isError]
  * @param {string} view.meta      the line above: endpoint, scope, source, time
  * @param {Array<{name: string, title: string, body: any, error: string}>} view.answers
+ * @param {object} [view.summary]   one line per server, for an all-servers answer
+ * @param {(rowId: string) => void} [view.onSelect]  a summary line was clicked
  * @param {boolean} view.keepScroll  the same answer refreshed, so stay put
  */
 export function renderMonitorEndpoint(view) {
@@ -1511,6 +1722,7 @@ export function renderMonitorEndpoint(view) {
   const top = els.monDetail.scrollTop;
   const single = view.answers.length === 1;
   const parts = [];
+  if (view.summary) parts.push(summaryTable(view.summary, view.onSelect));
   for (const a of view.answers) {
     // One server needs no heading: the meta line already names it.
     if (!single) {

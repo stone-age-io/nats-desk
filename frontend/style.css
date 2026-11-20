@@ -420,8 +420,17 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
   margin: var(--s2) 0 0; font-size: 0.72rem; line-height: 1.45; color: var(--muted);
 }
 .source-note code { font-size: 0.9em; }
-.source-hint { margin-top: var(--s2); font-size: 0.72rem; color: var(--accent); }
-.source-hint.bad { color: var(--danger); }
+
+/* A connected source, in one line: what it is connected to, and the way to
+   stop. The text takes the slack and gives way first. */
+.source-summary { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s2); }
+.source-summary-text {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: 0.72rem; color: var(--accent);
+}
+.source-summary-text.bad { color: var(--danger); }
+.source-summary-text.warn { color: var(--warn); }
 
 .source-fields { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s2); }
 .source-fields input { margin: 0; }
@@ -489,6 +498,39 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
   font-size: 0.72rem; font-weight: 600; color: var(--accent);
 }
 .mon-answer-err { padding: var(--s2) var(--s3) 0; font-size: 0.72rem; color: var(--danger); }
+
+/* The selected server, live: it re-renders on every heartbeat, so it sits
+   outside the scrolling answer and stays in view. */
+.mon-card {
+  flex-shrink: 0;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--panel);
+}
+.mon-card-head { display: flex; align-items: baseline; gap: var(--s2); min-width: 0; }
+.mon-card-name { font-weight: 600; font-size: 0.82rem; white-space: nowrap; }
+.mon-card-sub {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 0.7rem; color: var(--muted);
+}
+.mon-card-state { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+.mon-card-state.stale, .mon-card-state.shutdown { color: var(--danger); }
+.mon-card-state.lameduck { color: var(--warn); }
+.mon-card-head .sm-btn { align-self: center; padding: 0 7px; line-height: 1.5; }
+.mon-card .svc-meta { margin-top: var(--s2); }
+.meta-chip.hot { border-color: rgba(248,81,73,0.5); }
+.meta-chip.hot b { color: var(--danger); }
+
+/* One line per server above an all-servers answer: the part worth comparing
+   across servers, before the raw replies. A row selects its server. */
+.mon-summary { margin-bottom: var(--s2); }
+.mon-summary tbody tr.unselectable { cursor: default; }
+.mon-summary td.err { color: var(--danger); white-space: normal; }
+.mon-summary td.good { color: var(--primary); }
+.mon-summary td.hot { color: var(--danger); font-weight: 600; }
+.mon-summary td.warn { color: var(--warn); }
+.mon-summary td.wrap { white-space: normal; max-width: 260px; }
 
 /* Two lines: when, what and where on the first, who and why under it. On one
    line the who - the part worth reading - was what got squeezed out in a

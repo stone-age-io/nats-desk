@@ -641,31 +641,39 @@
                 <span id="srcSysDot" class="source-dot" aria-hidden="true"></span>
                 <strong>System account</strong>
               </div>
-              <p class="source-note">
-                A second connection, in the $SYS account. The only source that reaches a
-                whole cluster in one request and pushes events as they happen.
-              </p>
 
-              <label for="monSysContext">NATS CLI context</label>
-              <select id="monSysContext">
-                <option value="">-- Manual settings --</option>
-              </select>
-
-              <div id="monSysManual" class="source-fields">
-                <input type="text" id="monSysUrl" placeholder="nats://localhost:4222"
-                       autocorrect="off" autocapitalize="off" spellcheck="false" />
-                <input type="text" id="monSysUser" placeholder="Username"
-                       autocorrect="off" autocapitalize="off" spellcheck="false" />
-                <input type="password" id="monSysPass" placeholder="Password" />
-                <label for="monSysCreds" class="muted-xs">Or a .creds file</label>
-                <input type="file" id="monSysCreds" accept=".creds,.txt" />
+              <!-- Once connected the form has done its job; the card shrinks to
+                   what it is connected to and the way to stop. -->
+              <div id="monSysSummary" class="source-summary" hidden>
+                <span id="monSysSummaryText" class="source-summary-text"></span>
+                <button id="btnMonSysDisconnect" class="sm-btn danger">Disconnect</button>
               </div>
 
-              <div class="row-buttons">
-                <button id="btnMonSysConnect" class="sm-btn accent">Connect</button>
-                <button id="btnMonSysDisconnect" class="sm-btn danger" hidden>Disconnect</button>
+              <div id="monSysForm">
+                <p class="source-note">
+                  A second connection, in the $SYS account. The only source that reaches a
+                  whole cluster in one request and pushes events as they happen.
+                </p>
+
+                <label for="monSysContext">NATS CLI context</label>
+                <select id="monSysContext">
+                  <option value="">-- Manual settings --</option>
+                </select>
+
+                <div id="monSysManual" class="source-fields">
+                  <input type="text" id="monSysUrl" placeholder="nats://localhost:4222"
+                         autocorrect="off" autocapitalize="off" spellcheck="false" />
+                  <input type="text" id="monSysUser" placeholder="Username"
+                         autocorrect="off" autocapitalize="off" spellcheck="false" />
+                  <input type="password" id="monSysPass" placeholder="Password" />
+                  <label for="monSysCreds" class="muted-xs">Or a .creds file</label>
+                  <input type="file" id="monSysCreds" accept=".creds,.txt" />
+                </div>
+
+                <div class="row-buttons">
+                  <button id="btnMonSysConnect" class="sm-btn accent">Connect</button>
+                </div>
               </div>
-              <div id="monSysHint" class="source-hint" hidden></div>
             </div>
 
             <div class="source-card">
@@ -673,26 +681,34 @@
                 <span id="srcHttpDot" class="source-dot" aria-hidden="true"></span>
                 <strong>HTTP monitoring</strong>
               </div>
-              <p class="source-note">
-                The <code>:8222</code> endpoints. Needs no NATS credentials - and offers no
-                authentication of its own, so treat anything it returns as readable by
-                whoever can reach that port.
-              </p>
 
-              <label for="monHttpBases">Base URLs, one per line</label>
-              <textarea id="monHttpBases" rows="3" placeholder="http://localhost:8222"
-                        autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
-
-              <label class="check-row compact">
-                <input type="checkbox" id="monHttpInsecure" />
-                <span>Skip TLS verification</span>
-              </label>
-
-              <div class="row-buttons">
-                <button id="btnMonHttpSave" class="sm-btn accent">Use</button>
+              <div id="monHttpSummary" class="source-summary" hidden>
+                <span id="monHttpSummaryText" class="source-summary-text"></span>
+                <button id="btnMonHttpEdit" class="sm-btn">Edit</button>
                 <button id="btnMonHttpClear" class="sm-btn">Clear</button>
               </div>
-              <div id="monHttpHint" class="source-hint" hidden></div>
+
+              <div id="monHttpForm">
+                <p class="source-note">
+                  The <code>:8222</code> endpoints. Needs no NATS credentials - and offers no
+                  authentication of its own, so treat anything it returns as readable by
+                  whoever can reach that port.
+                </p>
+
+                <label for="monHttpBases">Base URLs, one per line</label>
+                <textarea id="monHttpBases" rows="3" placeholder="http://localhost:8222"
+                          autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+
+                <label class="check-row compact">
+                  <input type="checkbox" id="monHttpInsecure" />
+                  <span>Skip TLS verification</span>
+                </label>
+
+                <div class="row-buttons">
+                  <button id="btnMonHttpSave" class="sm-btn accent">Use</button>
+                  <button id="btnMonHttpCancel" class="sm-btn" hidden>Cancel</button>
+                </div>
+              </div>
             </div>
 
           </div>
@@ -748,6 +764,7 @@
                 </select>
                 <button id="btnMonEndpoint" class="sm-btn" title="Ask every server again">&#10227;</button>
               </div>
+              <div id="monServerCard" class="mon-card" hidden></div>
               <div id="monEndpointMeta" class="mon-meta" hidden></div>
               <div id="monDetail" class="list-scroll">
                 <div class="empty">Connect the system account, or add monitoring URLs, to ask the servers for these endpoints</div>

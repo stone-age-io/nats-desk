@@ -56,12 +56,19 @@ type SysStatus struct {
 	Configured bool   `json:"configured"`
 	Connected  bool   `json:"connected"`
 	URL        string `json:"url,omitempty"`
-	Servers    int    `json:"servers,omitempty"`
+	// The NATS CLI context it was opened with, if any. The connected card
+	// leads with it: "prod-sys" says which system account this is, where a
+	// host and port may not.
+	Context string `json:"context,omitempty"`
+	Servers int    `json:"servers,omitempty"`
 }
 
 type HTTPStatus struct {
 	Configured bool     `json:"configured"`
 	Bases      []string `json:"bases,omitempty"`
+	// Certificate verification is off. Reported so the collapsed card can say
+	// so, rather than hiding the one setting that weakens the connection.
+	Insecure bool `json:"insecure,omitempty"`
 }
 
 // DataConn is the app's own NATS connection, borrowed for the account-scoped
@@ -101,11 +108,12 @@ func (m *Monitor) Status() Status {
 			Configured: true,
 			Connected:  !sys.nc.IsClosed() && sys.nc.IsConnected(),
 			URL:        sys.url,
+			Context:    sys.context,
 			Servers:    len(m.grid.rowsSorted()),
 		}
 	}
 	if httpSrc != nil {
-		st.HTTP = HTTPStatus{Configured: true, Bases: httpSrc.bases}
+		st.HTTP = HTTPStatus{Configured: true, Bases: httpSrc.bases, Insecure: httpSrc.opts.Insecure}
 	}
 	return st
 }

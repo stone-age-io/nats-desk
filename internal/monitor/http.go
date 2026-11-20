@@ -99,6 +99,11 @@ func (m *Monitor) ClearHTTP() {
 	m.mu.Lock()
 	m.http = nil
 	m.mu.Unlock()
+
+	// The rows this source supplied go with it, as $SYS rows do on a
+	// disconnect. They used to stay, sitting in the grid as if still watched.
+	m.grid.prune(nil, "http")
+	m.sink.MonitorServers(m.grid.rowsSorted())
 	m.sink.MonitorStatus(m.Status())
 }
 
