@@ -82,6 +82,9 @@ export const els = {
   monServerList: $("monServerList"),
   monServerCount: $("monServerCount"),
   btnMonRefresh: $("btnMonRefresh"),
+  btnMonViewGrid: $("btnMonViewGrid"),
+  btnMonViewMap: $("btnMonViewMap"),
+  monTopology: $("monTopology"),
 
   monEndpoint: $("monEndpoint"),
   monEndpointScope: $("monEndpointScope"),

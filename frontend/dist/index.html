@@ -20,8 +20,8 @@
   <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="manifest" href="/manifest.json"/>
-  <script type="module" crossorigin src="/assets/index-BhnhYrdV.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-FeB23Qia.css">
+  <script type="module" crossorigin src="/assets/index-CpYFEWB_.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-HCEfi0fJ.css">
 </head>
 <body data-conn="disconnected">
 
@@ -722,12 +722,17 @@
           <div class="pane-head">
             <h3>Servers <span id="monServerCount" class="accent">(0)</span></h3>
             <div class="pane-actions">
+              <div class="view-toggle" role="group" aria-label="Server view">
+                <button id="btnMonViewGrid" class="sm-btn active" aria-pressed="true">Grid</button>
+                <button id="btnMonViewMap" class="sm-btn" aria-pressed="false">Map</button>
+              </div>
               <button id="btnMonRefresh" class="sm-btn" title="Ask every server for its stats now">&#10227;</button>
             </div>
           </div>
           <div id="monServerList" class="list-scroll mon-scroll">
             <div class="empty">No monitoring source is configured</div>
           </div>
+          <div id="monTopology" class="mon-topology" hidden></div>
         </div>
 
         <div class="splitter" data-col="1" role="separator" tabindex="0"

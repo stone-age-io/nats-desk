@@ -106,6 +106,101 @@ func TestRateSkipsARestartThenRecovers(t *testing.T) {
 	}
 }
 
+func route(peer string, in, out int64, pending int) *server.RouteStat {
+	r := &server.RouteStat{Name: peer, Pending: pending}
+	r.Received.Msgs, r.Sent.Msgs = in, out
+	return r
+}
+
+// A pair of servers keeps a pool of route connections, three by default plus
+// one per pinned account, and STATSZ lists each one. A link is the peer, so
+// the pool has to come back as one entry with its counters summed - otherwise
+// a three-node cluster reads as 8 routes.
+func TestRouteLinksSumThePoolPerPeer(t *testing.T) {
+	g := newGrid()
+	m := statsz("A", time.Now(), 0, 0)
+	m.Stats.Routes = []*server.RouteStat{
+		route("n2", 1, 10, 0), route("n2", 2, 20, 100), route("n2", 3, 30, 0), route("n2", 4, 40, 0),
+		route("n3", 5, 50, 7),
+	}
+	g.applyStatsz(m, "statsz")
+
+	r := row(t, g, "A")
+	if !r.RouteLinksKnown {
+		t.Fatal("every route named its peer, yet the links are marked unknown")
+	}
+	if len(r.RouteLinks) != 2 {
+		t.Fatalf("links = %+v, want one per peer", r.RouteLinks)
+	}
+	n2 := r.RouteLinks[0]
+	if n2.Peer != "n2" || n2.Conns != 4 || n2.InMsgs != 10 || n2.OutMsgs != 100 || n2.Pending != 100 {
+		t.Errorf("n2 = %+v, want 4 conns, 10 in, 100 out, 100 pending", n2)
+	}
+}
+
+// A route with no peer name - a server from before names were reported -
+// means the list cannot say which peer is missing, so it must not claim to.
+func TestAnUnnamedRouteMakesTheLinksUnknown(t *testing.T) {
+	g := newGrid()
+	m := statsz("A", time.Now(), 0, 0)
+	m.Stats.Routes = []*server.RouteStat{route("n2", 0, 0, 0), route("", 0, 0, 0)}
+	g.applyStatsz(m, "statsz")
+
+	if r := row(t, g, "A"); r.RouteLinksKnown {
+		t.Error("a list with an anonymous route was marked complete")
+	}
+}
+
+// Link rates follow the row's rules: none on first sight, the server's clock
+// for the interval, and none across a reset. A route connection that drops
+// and comes back starts its counters again, which must not print as a large
+// negative rate.
+func TestRouteLinkRates(t *testing.T) {
+	g := newGrid()
+	t0 := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	at := func(d time.Duration, out int64) {
+		m := statsz("A", t0.Add(d), 0, 0)
+		m.Stats.Routes = []*server.RouteStat{route("n2", 0, out, 0)}
+		g.applyStatsz(m, "statsz")
+	}
+	link := func() RouteLink { return row(t, g, "A").RouteLinks[0] }
+
+	at(0, 100)
+	if link().OutMsgsRate != nil {
+		t.Fatal("first sample produced a link rate")
+	}
+	at(10*time.Second, 600)
+	if r := link().OutMsgsRate; r == nil || *r != 50 {
+		t.Errorf("out rate = %v, want 50/sec", r)
+	}
+	at(20*time.Second, 30)
+	if r := link().OutMsgsRate; r != nil {
+		t.Errorf("a reset route produced a rate: %v", *r)
+	}
+}
+
+func TestMetaLeaderAndPeers(t *testing.T) {
+	g := newGrid()
+	m := statsz("A", time.Now(), 0, 0)
+	m.Stats.JetStream = &server.JetStreamVarz{Meta: &server.MetaClusterInfo{
+		Leader: "n1",
+		Size:   3,
+		Replicas: []*server.PeerInfo{
+			{Name: "n2", Current: true},
+			{Name: "n3", Offline: true, Lag: 12},
+		},
+	}}
+	g.applyStatsz(m, "statsz")
+
+	r := row(t, g, "A")
+	if r.MetaLeader != "n1" || r.MetaSize != 3 || len(r.MetaPeers) != 2 {
+		t.Fatalf("meta = %q/%d/%+v", r.MetaLeader, r.MetaSize, r.MetaPeers)
+	}
+	if p := r.MetaPeers[1]; p.Name != "n3" || !p.Offline || p.Lag != 12 {
+		t.Errorf("n3 = %+v, want offline with lag 12", p)
+	}
+}
+
 func TestRateIgnoresARepeatedSample(t *testing.T) {
 	g := newGrid()
 	t0 := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)

@@ -556,6 +556,81 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
 
 .mon-json { margin: 0; padding: var(--s3); font-size: 0.72rem; line-height: 1.5; white-space: pre; }
 
+/* Grid | Map, as one control */
+.view-toggle { display: inline-flex; }
+.view-toggle .sm-btn { border-radius: 0; }
+.view-toggle .sm-btn:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.view-toggle .sm-btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; border-left: 0; }
+.view-toggle .sm-btn.active { background: #21262d; color: #fff; }
+
+/* --------------------------------------------------------------------------
+   TOPOLOGY MAP
+   A healthy mesh is drawn quiet and a break is drawn loud: working routes are
+   faint lines weighted by traffic, a missing one is red and dashed. Colours
+   come from the same tokens as the grid's state dots, so a stale server is the
+   same red in both.
+   -------------------------------------------------------------------------- */
+
+.mon-topology {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.mon-topology > .empty { margin: auto; }
+
+.topo-status {
+  display: flex; flex-wrap: wrap; gap: 2px var(--s3);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.7rem; color: var(--text);
+}
+.topo-status .good { color: var(--primary); }
+.topo-status .bad { color: var(--danger); font-weight: 600; }
+.topo-status .warn { color: var(--warn); }
+.topo-status .muted { color: var(--muted-dim); }
+
+.topo { flex: 1; min-height: 0; width: 100%; display: block; }
+.topo text { font-family: var(--font); text-anchor: middle; pointer-events: none; }
+
+.topo-cluster { fill: none; stroke: var(--border); stroke-dasharray: 3 4; }
+.topo-cluster.ghost { stroke: var(--muted-dim); }
+.topo-cluster-label { fill: var(--muted); font-size: 11px; font-weight: 600; }
+.topo .topo-cluster-label.corner { text-anchor: end; }
+
+.topo-route { stroke: var(--muted-dim); stroke-opacity: 0.55; stroke-linecap: round; }
+.topo-route.focus { stroke: var(--accent); stroke-opacity: 0.9; }
+.topo-route.struggling { stroke: var(--warn); stroke-opacity: 0.95; }
+.topo-route.ghosted { stroke-dasharray: 2 4; }
+.topo-route.down { stroke: var(--muted-dim); stroke-opacity: 0.6; stroke-dasharray: 5 5; }
+.topo-route.missing { stroke: var(--danger); stroke-opacity: 1; stroke-dasharray: 6 5; }
+
+.topo-gateway { stroke: var(--accent); stroke-opacity: 0.6; stroke-linecap: round; }
+.topo-gateway.partial { stroke: var(--warn); stroke-dasharray: 6 5; stroke-opacity: 0.9; }
+
+.topo-leaf-line { stroke: var(--muted-dim); stroke-opacity: 0.6; stroke-dasharray: 2 3; }
+.topo-leaf circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.25; }
+.topo-leaf.many circle { stroke-dasharray: 2 2; }
+.topo-leaf-label { fill: var(--muted); font-size: 10px; }
+.topo-leaf-count { fill: var(--text); font-size: 9px; font-weight: 600; }
+
+.topo-node { cursor: pointer; outline: none; }
+.topo-node.ghost { cursor: default; }
+.topo-dot { fill: var(--panel); stroke: var(--primary); stroke-width: 2; }
+.topo-node.lameduck .topo-dot { stroke: var(--warn); }
+.topo-node.stale .topo-dot, .topo-node.shutdown .topo-dot { stroke: var(--danger); fill: var(--panel-2); }
+.topo-node.ghost .topo-dot { stroke: var(--muted-dim); stroke-dasharray: 3 3; }
+.topo-node.js-offline .topo-dot { stroke: var(--danger); }
+.topo-node.js-behind .topo-dot { stroke: var(--warn); }
+.topo-node:hover .topo-dot, .topo-node:focus-visible .topo-dot { fill: #21262d; }
+.topo-node.selected .topo-dot { stroke: var(--accent); stroke-width: 3; fill: rgba(88,166,255,0.15); }
+.topo-leader-ring { fill: none; stroke: var(--accent); stroke-opacity: 0.6; stroke-dasharray: 2 3; }
+.topo-label { fill: var(--text); font-size: 11.5px; font-weight: 600; }
+.topo-node.stale .topo-label, .topo-node.shutdown .topo-label, .topo-node.ghost .topo-label { fill: var(--muted); }
+.topo-sublabel { fill: var(--muted); font-size: 10px; }
+.topo-node.stale .topo-sublabel, .topo-node.shutdown .topo-sublabel, .topo-node.js-offline .topo-sublabel { fill: var(--danger); }
+.topo-node.lameduck .topo-sublabel, .topo-node.js-behind .topo-sublabel { fill: var(--warn); }
+
 /* --------------------------------------------------------------------------
    SERVICES
    Three panes, narrowing left to right: every service, the instances of one,
@@ -1387,6 +1462,9 @@ dialog.app-dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blu
   .log-pane .list-scroll { min-height: 340px; max-height: 60vh; }
   #consumerList, #streamMsgContainer { min-height: 260px; max-height: 60vh; }
   #monServerList, #monEvents, #monDetail, #monAccount { min-height: 240px; max-height: 60vh; }
+  /* The map is drawn to its box, so it needs a height of its own here, not a
+     range: with nothing inside it to push, a min-height alone collapses it. */
+  #monTopology { flex: none; height: 60vh; min-height: 360px; }
   #svcInstances, #svcEndpoints, #svcRaw { min-height: 240px; max-height: 60vh; }
   .svc-req-row { flex-wrap: wrap; }
   .svc-req-row input, .svc-req-row .composer-send { flex: 1 1 100%; }

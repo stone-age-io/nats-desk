@@ -20,6 +20,7 @@ const KEYS = {
   LOG_NEWEST_FIRST: "nats_log_newest_first",
   PANE_SIZES: "nats_pane_sizes",
   MONITOR_HTTP: "nats_monitor_http",
+  MONITOR_VIEW: "nats_monitor_view",
 };
 
 // ============================================================================
@@ -247,6 +248,23 @@ export function setExcludeSystem(exclude) {
 // LOG ORDER PREFERENCE
 // ============================================================================
 // false (default) = newest at the bottom, like `nats sub` and other tail tools
+
+/** The Monitor tab's server view, "grid" or "map". A per-viewer convenience only. */
+export function getMonitorView() {
+  try {
+    return localStorage.getItem(KEYS.MONITOR_VIEW) === "map" ? "map" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+
+export function setMonitorView(view) {
+  try {
+    localStorage.setItem(KEYS.MONITOR_VIEW, view);
+  } catch {
+    // Remembering the view is a nicety; the page works without it.
+  }
+}
 
 export function getLogNewestFirst() {
   return localStorage.getItem(KEYS.LOG_NEWEST_FIRST) === "true";

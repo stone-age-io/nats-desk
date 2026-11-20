@@ -112,6 +112,44 @@ export function formatDuration(ns) {
   return `${(ns / 1e9).toFixed(1)}s`;
 }
 
+/** A per-second rate, to a precision that suits its size. "-" when unmeasured. */
+export function formatRate(v) {
+  if (v == null) return "-";
+  if (v >= 1000) return Math.round(v).toLocaleString();
+  if (v >= 10) return v.toFixed(0);
+  return v.toFixed(1);
+}
+
+// ============================================================================
+// MONITORING
+// ============================================================================
+
+/**
+ * A server we have stopped hearing from.
+ *
+ * STATSZ arrives every ten seconds by default, so a row that has said nothing
+ * for three intervals has stopped reporting - a hard-killed server never sends
+ * SHUTDOWN, so this is the only signal there is. The row is dimmed rather than
+ * dropped: a grid that quietly loses a line does not tell you anything went
+ * away.
+ */
+export const STALE_AFTER_MS = 30000;
+
+/**
+ * A grid row's state, as a class for its dot and words for its tooltip and a
+ * screen reader. The grid, the server card and the topology map all use it,
+ * so a server is never "stale" in one and fine in another.
+ */
+export function serverState(r, now) {
+  if (r.state === "shutdown") return { cls: "shutdown", text: "Shut down" };
+  if (r.state === "lameduck") return { cls: "lameduck", text: "Entering lame duck mode" };
+  const quiet = now - new Date(r.seen).getTime();
+  if (quiet > STALE_AFTER_MS) {
+    return { cls: "stale", text: `No report for ${Math.round(quiet / 1000)}s` };
+  }
+  return { cls: "ok", text: "Reporting" };
+}
+
 /** How long ago something started, coarsely: "45s", "12m", "3h 4m", "2d 3h". */
 export function formatAge(ms) {
   if (ms == null || ms < 0) return "-";

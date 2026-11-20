@@ -523,6 +523,66 @@ thing, and "TLS not verified" stays visible on the collapsed card. Edit
 reopens the form on the URLs actually in use, not on leftover edits, and only
 a URL the backend accepts collapses it again.
 
+**The topology map is built to show what is broken, not to look busy.** A
+NATS cluster is a full mesh by design, so a healthy one always draws as every
+server joined to every other, and the picture carries information only where
+that breaks. So a working route is a faint line weighted by measured traffic,
+and a missing one is red and dashed. The map is the server pane's other view
+(Grid | Map, remembered per viewer), so clicking a node selects that server
+exactly as a grid row does. `frontend/topology.js` has three parts kept
+apart: `buildTopology` (rows to a model), `layoutTopology` and
+`renderTopology`. It imports only `utils.js`, so the model loads in Node
+without a DOM, which is how its failure cases were checked: a missing route
+cannot be produced on a local rig, because routes gossip. Choices to keep:
+
+- **Route data rides the grid rows**, from STATSZ: `route_links` grouped per
+  peer (the pool, three connections per peer by default, would read as 8
+  routes in a three-node cluster), `gateway_links`, and the meta leader and
+  its peers. Link rates follow the row's rules: the server's clock, none on
+  first sight, none across a reset. Leaf nodes are not in STATSZ and no event
+  covers them (`LEAFNODE.CONNECT` is internal), so the map asks leafz when it
+  opens, on ⟳, and every 30s while it is on screen and the window visible.
+  Over `:8222` nothing is pushed, so it asks routez and gatewayz too, and says
+  those routes have no rates.
+- **Only a known empty list is a missing route.** `route_links_known` is false
+  for a `:8222` row and for a server that does not name its route peers, and
+  unknown is never drawn as missing. Expected pairs are within one cluster,
+  between servers that are both up and both known; "N of M routes" counts the
+  same pairs on both sides.
+- **A server that has stopped reporting is not believed about its routes.**
+  Its last report lists routes its peers dropped when it died, and drawing
+  those as up was the first bug the live kill test found. Its routes are grey
+  and down, not red and missing, because the reason is already on screen. Its
+  peers' fresh reports still count. It also comes first in its label and in
+  the status line, ahead of its JetStream standing, which follows from it.
+- **A route to a server nobody can see is a ghost node**, and a gateway to a
+  cluster the source cannot see is a ghost cluster. Seeing that n1 and n2
+  route to an n4 that says nothing is the point.
+- **Gateways are per pair of clusters.** Every server keeps its own outbound
+  connection to every other cluster, so a server lacking one while its
+  neighbours have it turns the line amber and is named in the tooltip. A
+  gateway's name is taken to be its cluster's name, which nats-server
+  requires.
+- **The meta leader is decided by vote**, among servers that are up, and a
+  split is reported rather than resolved silently.
+- **More than six leaf nodes on one hub become one counted node.** An edge
+  fleet can hang hundreds off a server. A leaf whose server is already on the
+  map is a line to that node, not a second circle.
+- **The layout is deterministic** (rings in name order) so nothing moves
+  between heartbeats. Two clusters stack along the pane's long side. The SVG
+  is drawn 1:1 and only scaled down, never up; scaling three servers up to
+  fill a wide pane blew the labels up to headline size.
+- **Heartbeats redraw the map, so a redraw is held while the pointer is over
+  it**, or the tooltip being read would vanish every few seconds. A click or
+  a fresh leafz answer redraws at once. Keyboard focus is restored by node
+  key across redraws.
+- **Every refresh supersedes the one in flight**, and only the latest clears
+  `topologyAsking`. Its idle value is `null`, not `""`: `""` is also "no
+  source", and once made a disconnect look like a request already out, so
+  nothing was asked again after a reconnect. Leafz answers are keyed by the
+  server ID they carry, not by grid row; on a fresh connect they can land
+  before the grid does.
+
 **An event row says who and why.** The backend always sent the whole event
 body; the row showed only the kind and the server. It now picks account, user,
 client name, IP and the disconnect reason out of the client block, on a second
@@ -825,6 +885,12 @@ ports so both run at once:
   account written with `jwt.FormatUserConfig`, and a config carrying
   `operator:`, `system_account:`, `resolver: MEMORY` and `resolver_preload`.
   Generate it into the scratchpad; it must not ship in `cmd/`.
+- for the topology map, the three node cluster with a `gateway` block (c1,
+  7322-7324) and a `leafnodes` listener (7422-7424), a second cluster c2 on
+  4521-4522 (monitoring 8521-8522, routes 6521-6522, gateway 7521-7522), and
+  three leaf servers on 4621-4623 whose `remotes` log in as an `APP` user, so
+  the hub binds them to `APP`. Hard-kill one c1 server to see the stale and
+  down states; a graceful shutdown cannot be produced here (see below).
 
 Set `server_name` in any test rig. Without it NATS reports the 56-character
 server ID as the name, which is worth seeing once - it is what caught the grid's
@@ -868,7 +934,8 @@ silently wrong: the subject filter rules, the KV operation mapping, KV write con
 request scatter-gather, dropping a replaced connection's status reports, the
 batching/drop accounting, the context editor's round-trip fidelity, creating
 a context (where its creds land, never overwriting, cleaning up), the
-monitoring rate arithmetic, which server a `:8222` answer came from, the
+monitoring rate arithmetic, folding STATSZ route pools into one link per peer
+(and their rates across a reset), which server a `:8222` answer came from, the
 `natsdesk://` argument parsing, the token
 file's accept/reject rules, and the idle countdown quit-on-close relies on -
 that a reload survives it and turning it off cancels one already running.
@@ -917,3 +984,7 @@ round-trip itself is verified by driving the real app.
 - **Phase 6 (done):** micro services - `$SRV` discovery on the data connection,
   instances with their stats, and a request form per endpoint that reads
   micro's error headers.
+- **Phase 7 (done):** the Monitor tab made usable - endpoints that load when
+  picked and filter by server, a live server card, per-server summary lines,
+  events that say who and why, collapsed source cards - and a topology map of
+  routes, gateways, leaf nodes and the JetStream meta group.

@@ -1381,44 +1381,14 @@ export function setConnectionState(state, url = null) {
 // MONITOR
 // ============================================================================
 
-/**
- * A server we have stopped hearing from.
- *
- * STATSZ arrives every ten seconds by default, so a row that has said nothing
- * for three intervals has stopped reporting - a hard-killed server never sends
- * SHUTDOWN, so this is the only signal there is. The row is dimmed rather than
- * dropped: a grid that quietly loses a line does not tell you anything went
- * away.
- */
-const STALE_AFTER_MS = 30000;
-
 export function setMonitorSources(status) {
   els.srcDataDot.classList.toggle("live", !!(status && status.data));
   els.srcSysDot.classList.toggle("live", !!(status && status.sys && status.sys.connected));
   els.srcHttpDot.classList.toggle("live", !!(status && status.http && status.http.configured));
 }
 
-function rate(v) {
-  if (v == null) return "-";
-  if (v >= 1000) return Math.round(v).toLocaleString();
-  if (v >= 10) return v.toFixed(0);
-  return v.toFixed(1);
-}
-
-/**
- * What a row's state dot means, in words, for its tooltip and for a screen
- * reader. The dot sits first in the row because state is the column that
- * matters most, and as the last column it was the first to scroll out of view.
- */
-function serverState(r, now) {
-  if (r.state === "shutdown") return { cls: "shutdown", text: "Shut down" };
-  if (r.state === "lameduck") return { cls: "lameduck", text: "Entering lame duck mode" };
-  const quiet = now - new Date(r.seen).getTime();
-  if (quiet > STALE_AFTER_MS) {
-    return { cls: "stale", text: `No report for ${Math.round(quiet / 1000)}s` };
-  }
-  return { cls: "ok", text: "Reporting" };
-}
+const rate = utils.formatRate;
+const serverState = utils.serverState;
 
 export function renderMonitorServers(rows, onSelect) {
   els.monServerCount.textContent = `(${rows.length})`;

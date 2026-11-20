@@ -14,6 +14,7 @@ import * as ui from "./ui.js";
 import * as nats from "./api.js";
 import * as storage from "./storage.js";
 import * as dlg from "./dialogs.js";
+import * as topology from "./topology.js";
 import { initPaneSplitters } from "./splitters.js";
 
 // ============================================================================
@@ -29,6 +30,10 @@ const DROP_REPORT_THROTTLE_MS = 3000;
 
 // Default RPC timeout in milliseconds
 const DEFAULT_RPC_TIMEOUT_MS = 2000;
+
+// How often the map re-asks for what no heartbeat carries: leaf nodes over
+// $SYS, and everything over :8222. Only while the map is on screen.
+const TOPOLOGY_REFRESH_MS = 30000;
 
 // Monitor wording, shared by more than one code path
 const VIA_LABELS = { sys: "via $SYS", http: "via :8222" };
@@ -108,6 +113,14 @@ const appState = {
   monitorAccountSeq: 0,
   // The :8222 card is open for editing although a source is in use
   monitorHttpEditing: false,
+  // The server pane's view, and what the map has had to ask for itself:
+  // { via, at, leafs, routes, gateways, errors } - see refreshTopologyExtras
+  monitorView: "grid",
+  topologyExtras: null,
+  topologySeq: 0,
+  topologyAsking: null, // the source a refresh is out asking, null when none is
+  topologyTimer: null,
+  topologyDeferred: false,
 
   // Services: the last census, and what is selected in it. The backend keeps
   // nothing, so this is the only copy; servicesAt is null until a census has
@@ -186,6 +199,7 @@ function initializeApp() {
     onEvent: ui.appendMonitorEvent,
     onStatus: applyMonitorStatus,
   });
+  setMonitorView(storage.getMonitorView());
   // Order matters: restoring the URLs re-registers them with the backend, and
   // loadMonitor then reports a status that includes them.
   restoreMonitorHttp().then(loadMonitor);
@@ -1305,6 +1319,14 @@ function applyMonitorStatus(status) {
   ui.setMonitorSources(status);
   renderSourceCards(status);
   syncMonitorEndpoint();
+
+  // The map's extras belong to one source; when the source to ask changes,
+  // ask the new one rather than drawing the old answers over new servers.
+  if (appState.monitorView === "map" && ui.getActiveTab() === "monitor") {
+    const via = topologyVia();
+    const have = (appState.topologyExtras && appState.topologyExtras.via) || "";
+    if (via !== have && via !== appState.topologyAsking) refreshTopologyExtras();
+  }
 }
 
 /** "127.0.0.1:4322" out of "nats://127.0.0.1:4322", or the input if it will not parse. */
@@ -1380,6 +1402,7 @@ function handleMonitorServers(rows) {
   ui.renderMonitorServers(rows, selectMonitorServer);
   ui.renderMonitorScope(rows, appState.monitorServer);
   renderMonitorServerCard();
+  renderTopologyView();
   if (appState.monitorServer) ui.highlightMonitorServer(appState.monitorServer);
 
   // The grid arrives on its own - a server heartbeats, a row appears - so the
@@ -1426,6 +1449,7 @@ function setMonitorScope(id) {
   els.monEndpointScope.value = id || "";
   renderMonitorServerCard();
   renderMonitorEndpoint();
+  renderTopologyView({ force: true });
 }
 
 function activeMonitorSubtab() {
@@ -1452,6 +1476,7 @@ async function loadMonitor() {
   // just started is not repeated.
   loadMonitorEndpoint();
   if (activeMonitorSubtab() === "account") handleMonAccountLoad();
+  if (appState.monitorView === "map") refreshTopologyExtras();
 }
 
 // ----------------------------------------------------------------------------
@@ -1665,9 +1690,137 @@ async function handleMonitorRefresh() {
   try {
     handleMonitorServers(await nats.refreshMonitorServers());
     applyMonitorStatus(await nats.getMonitorStatus());
+    if (appState.monitorView === "map") refreshTopologyExtras();
   } catch (err) {
     ui.showToast(err.message, "error");
   }
+}
+
+// ----------------------------------------------------------------------------
+// Topology map: the server pane's other view. See topology.js for what it
+// draws and why; this is when it draws and what it asks for.
+// ----------------------------------------------------------------------------
+
+/** Switch the server pane between the grid and the map. */
+function setMonitorView(view) {
+  appState.monitorView = view === "map" ? "map" : "grid";
+  storage.setMonitorView(appState.monitorView);
+  const map = appState.monitorView === "map";
+  els.monServerList.hidden = map;
+  els.monTopology.hidden = !map;
+  for (const [btn, on] of [[els.btnMonViewGrid, !map], [els.btnMonViewMap, map]]) {
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", String(on));
+  }
+
+  clearInterval(appState.topologyTimer);
+  appState.topologyTimer = null;
+  if (map) {
+    appState.topologyTimer = setInterval(() => {
+      // Nobody is looking: a hidden window or another tab asks nothing.
+      if (document.visibilityState === "visible" && ui.getActiveTab() === "monitor") refreshTopologyExtras();
+    }, TOPOLOGY_REFRESH_MS);
+    renderTopologyView({ force: true });
+    if (ui.getActiveTab() === "monitor") refreshTopologyExtras();
+  }
+}
+
+/** Which source the map asks, as the endpoint view would: $SYS when it is up. */
+function topologyVia() {
+  const live = endpointSources();
+  return live.sys ? "sys" : live.http ? "http" : "";
+}
+
+/**
+ * Ask for what the grid's heartbeats do not carry.
+ *
+ * Over $SYS, routes and gateways come with every STATSZ and only leaf nodes
+ * have to be asked for. Over :8222 nothing is pushed, so routes and gateways
+ * are asked for too - and come without rates, which need two samples.
+ */
+async function refreshTopologyExtras() {
+  const via = topologyVia();
+  // Every call supersedes the one in flight, and only the latest clears
+  // topologyAsking - so it can never be left set by an answer nobody wants.
+  const seq = ++appState.topologySeq;
+  appState.topologyAsking = via;
+  if (!via) {
+    appState.topologyAsking = null;
+    appState.topologyExtras = null;
+    renderTopologyView({ force: true });
+    return;
+  }
+
+  const names = via === "http" ? ["leafz", "routez", "gatewayz"] : ["leafz"];
+  const ask = (name) =>
+    (via === "http" ? nats.getMonitorHttpEndpoint(name) : nats.getMonitorEndpoint(name))
+      .then((res) => normalizeAnswers(via, res));
+  const settled = await Promise.allSettled(names.map(ask));
+  if (seq !== appState.topologySeq) return;
+  appState.topologyAsking = null;
+
+  const extras = { via, at: new Date(), leafs: new Map(), routes: new Map(), gateways: new Map(), errors: [] };
+  settled.forEach((s, i) => {
+    if (s.status === "rejected") {
+      extras.errors.push(`${names[i]}: ${s.reason.message}`);
+      return;
+    }
+    for (const a of s.value) {
+      // Keyed by the ID the answer carries, not by a grid row: on a fresh
+      // connect these answers can land before the grid does, and matching
+      // against an empty grid would throw every one of them away.
+      const id = a.id || gridRowFor(a);
+      if (!id || !a.body || typeof a.body !== "object") continue;
+      if (names[i] === "leafz") extras.leafs.set(id, a.body.leafs || []);
+      else if (names[i] === "routez") extras.routes.set(id, topology.routezLinks(a.body, appState.monitorServers));
+      else if (names[i] === "gatewayz") extras.gateways.set(id, topology.gatewayzLinks(a.body));
+    }
+  });
+  appState.topologyExtras = extras;
+  renderTopologyView({ force: true });
+}
+
+/**
+ * Redraw the map from the grid as it stands.
+ *
+ * Every heartbeat redraws it, and a redraw under the pointer would snatch away
+ * the tooltip being read. So while the pointer is over the map a heartbeat is
+ * held back until it leaves; a click or a fresh answer redraws at once.
+ */
+function renderTopologyView({ force = false } = {}) {
+  if (appState.monitorView !== "map") return;
+  const el = els.monTopology;
+  if (!force && el.matches(":hover")) {
+    appState.topologyDeferred = true;
+    return;
+  }
+  appState.topologyDeferred = false;
+
+  const rows = appState.monitorServers;
+  if (!rows.length) {
+    ui.setEmpty(el, topologyVia() ? "No servers reporting yet" : ENDPOINT_NO_SOURCE);
+    return;
+  }
+
+  // Extras from a source that has since gone are not about these servers.
+  let extras = appState.topologyExtras;
+  if (extras && extras.via !== topologyVia()) extras = null;
+
+  let note = null;
+  if (extras && extras.errors.length) note = { text: extras.errors.join("; "), cls: "bad" };
+  else if (extras && extras.via === "http") {
+    note = { text: `routes from :8222 at ${extras.at.toLocaleTimeString()}, without rates` };
+  }
+
+  topology.renderTopology(el, topology.buildTopology(rows, extras || {}), {
+    selectedId: appState.monitorServer,
+    onSelect: (id) => {
+      const row = appState.monitorServers.find((r) => r.id === id);
+      if (row) selectMonitorServer(row);
+    },
+    note,
+    unmeasured: topologyVia() === "http" ? "no rate over :8222, which needs two samples" : null,
+  });
 }
 
 async function handleMonSysConnect() {
@@ -1802,6 +1955,14 @@ async function restoreMonitorHttp() {
 }
 
 els.btnMonRefresh.addEventListener("click", handleMonitorRefresh);
+els.btnMonViewGrid.addEventListener("click", () => setMonitorView("grid"));
+els.btnMonViewMap.addEventListener("click", () => setMonitorView("map"));
+els.monTopology.addEventListener("mouseleave", () => {
+  if (appState.topologyDeferred) renderTopologyView();
+});
+// The map is drawn to the pane's size, so a splitter drag or a window resize
+// redraws it.
+new ResizeObserver(() => renderTopologyView({ force: true })).observe(els.monTopology);
 els.btnMonSysConnect.addEventListener("click", handleMonSysConnect);
 els.btnMonSysDisconnect.addEventListener("click", handleMonSysDisconnect);
 els.btnMonHttpSave.addEventListener("click", handleMonHttpSave);
