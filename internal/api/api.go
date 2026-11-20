@@ -201,12 +201,23 @@ func (a *API) publish(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func replyJSON(m *nats.Msg) map[string]any {
+	return map[string]any{
+		"subject": m.Subject,
+		"data":    base64.StdEncoding.EncodeToString(m.Data),
+		"headers": fromNatsHeader(m.Header),
+	}
+}
+
+// request takes the first reply, or with "all" every reply within the
+// timeout. The two give different shapes: one reply, or {replies, truncated}.
 func (a *API) request(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Subject   string              `json:"subject"`
 		Data      string              `json:"data"`
 		Headers   map[string][]string `json:"headers"`
 		TimeoutMs int                 `json:"timeoutMs"`
+		All       bool                `json:"all"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -225,16 +236,26 @@ func (a *API) request(w http.ResponseWriter, r *http.Request) {
 		timeout = 5 * time.Second
 	}
 
+	if req.All {
+		g, err := a.mgr.RequestAll(req.Subject, data, toNatsHeader(req.Headers), timeout)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		replies := make([]map[string]any, 0, len(g.Replies))
+		for _, m := range g.Replies {
+			replies = append(replies, replyJSON(m))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"replies": replies, "truncated": g.Truncated})
+		return
+	}
+
 	reply, err := a.mgr.Request(req.Subject, data, toNatsHeader(req.Headers), timeout)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"subject": reply.Subject,
-		"data":    base64.StdEncoding.EncodeToString(reply.Data),
-		"headers": fromNatsHeader(reply.Header),
-	})
+	writeJSON(w, http.StatusOK, replyJSON(reply))
 }
 
 // ============================================================================

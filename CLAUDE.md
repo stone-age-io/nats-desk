@@ -356,6 +356,32 @@ with it unseen. Reply-to applies to Pub only; Req always makes its own inbox.
 nats.go rejects a bad reply subject with the same `ErrBadSubject` as a bad
 subject, so the error names both fields rather than blaming the wrong one.
 
+**Req takes the first reply unless asked for all of them.** That is core NATS
+request-reply: every subscriber gets the request and the requester keeps
+whichever answer arrives first, so `$SRV.PING` with three services shows one.
+"All replies" is a scatter-gather on its own inbox, and it waits for the
+*whole* timeout. That matches `nats req --replies=0` (measured). It does not
+stop when replies stall, as jsm.go's `DoReq` does for the services census.
+A stall rule suits `$SYS` and `$SRV`, where every responder answers within
+milliseconds of the rest. An application responder 800ms behind the others
+would be cut off with nothing to say so, and that is a gap in the log.
+Details:
+
+- The inbox is `nc.NewInbox()`, not `NewRespInbox()`. The second matches the
+  `_INBOX.<mux>.*` subscription that `Request` shares, which would get a
+  copy of every reply only to discard it.
+- A micro *endpoint* still answers once in "all" mode, because micro
+  subscribes endpoints in queue group `q` by default. The `$SRV.*` control
+  subjects have no queue group, and that is why they fan out.
+- Replies past 200 (the log's on-screen limit) are counted and reported, not
+  kept.
+- No responders is still reported at once. `NextMsg` turns the server's 503
+  into `ErrNoResponders`. The server sends the 503 only when nothing
+  subscribes, so it never comes after real replies.
+- The replies come back in one REST response when the window closes. They
+  are not streamed over the push channel: the user sets the window and it is
+  bounded, and the button shows "…" until it closes.
+
 **A queue subscription is tagged, and the queue box clears after every
 subscribe.** A queue member gets only its share of the traffic, which looks
 exactly like lost messages unless the row says why. Clearing the box means
@@ -670,8 +696,8 @@ C compiler, which the global `CGO_ENABLED=0` and a typical Windows dev box do
 not provide. Use `make test-race` where a toolchain exists.
 
 Coverage is currently thin and concentrated on the logic that is easy to get
-silently wrong: the subject filter rules, the KV operation mapping, KV write conflicts, the
-batching/drop accounting, the context editor's round-trip fidelity, the
+silently wrong: the subject filter rules, the KV operation mapping, KV write conflicts,
+request scatter-gather, the batching/drop accounting, the context editor's round-trip fidelity, the
 monitoring rate arithmetic, the `natsdesk://` argument parsing, the token
 file's accept/reject rules, and the idle countdown quit-on-close relies on -
 that a reload survives it and turning it off cancels one already running.
@@ -680,11 +706,13 @@ what fails when `frontend/dist` falls behind its sources. The HTTP and NATS
 layers are covered by driving the real UI against a real server, not by unit
 tests.
 
-`internal/services` is the exception, and so is `internal/natsconn`'s
-`kv_cas_test.go`: they start a real `nats-server` in the test process
-(loopback, random port; JetStream in a temp dir for the KV tests). The KV
-tests pin down which error a stale revision produces and what a tombstone
-does to a create-only write. The services tests register real micro services,
+`internal/services` is the exception, and so are `internal/natsconn`'s
+`kv_cas_test.go` and `request_test.go`: they start a real `nats-server` in the
+test process (loopback, random port; JetStream in a temp dir for the KV
+tests). The KV tests pin down which error a stale revision produces and what
+a tombstone does to a create-only write. The request tests pin down that a
+gather waits for a slow responder, that no responders fails at once while
+silence is a timeout, and that the cap counts what it drops. The services tests register real micro services,
 and what those check is mostly the server's behaviour - what "no responders" looks
 like, what a refused publish looks like, when an unsubscribe takes effect - and
 a fake would only encode guesses about all three. `censusTimeout` and

@@ -1245,19 +1245,40 @@ async function handleRequest() {
   }
 
   const timeout = parseInt(els.reqTimeout.value, 10) || DEFAULT_RPC_TIMEOUT_MS;
+  const all = els.reqReplies.value === "all";
 
   try {
     storage.addSubjectToHistory(subj);
     refreshHistoryUi();
     els.btnReq.disabled = true;
 
-    const msg = await nats.request(subj, els.pubPayload.value, ui.readHeadersJson(), timeout);
-    ui.renderMessage(msg.subject, msg.data, true, msg.headers);
+    if (!all) {
+      const msg = await nats.request(subj, els.pubPayload.value, ui.readHeadersJson(), timeout);
+      ui.renderMessage(msg.subject, msg.data, true, msg.headers);
+      return;
+    }
+
+    // Gathering waits out the whole timeout, so the button has to say it is
+    // still working or a two-second pause reads as nothing happening. Its
+    // width is held so the subject box beside it does not jump.
+    els.btnReq.style.minWidth = `${els.btnReq.offsetWidth}px`;
+    els.btnReq.textContent = "…";
+    const { replies, truncated } = await nats.requestAll(subj, els.pubPayload.value, ui.readHeadersJson(), timeout);
+    for (const r of replies) ui.renderMessage(r.subject, r.data, true, r.headers);
+    if (truncated) {
+      ui.showToast(
+        `${(replies.length + truncated).toLocaleString()} replies arrived - ` +
+          `the first ${replies.length} are shown, ${truncated.toLocaleString()} more were dropped`,
+        "info",
+      );
+    }
   } catch (err) {
     console.error("Request error:", err);
     ui.showToast(err.message, "error");
   } finally {
     els.btnReq.disabled = false;
+    els.btnReq.textContent = "Req";
+    els.btnReq.style.minWidth = "";
   }
 }
 

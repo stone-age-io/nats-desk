@@ -20,7 +20,7 @@
   <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="manifest" href="/manifest.json"/>
-  <script type="module" crossorigin src="/assets/index-rUELlisN.js"></script>
+  <script type="module" crossorigin src="/assets/index-ycsCOOaS.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-bwCBECwV.css">
 </head>
 <body data-conn="disconnected">
@@ -255,11 +255,17 @@
                            autocorrect="off" autocapitalize="off" spellcheck="false"
                            aria-label="Reply subject for Pub" />
                   </label>
-                  <label class="inline-field">
-                    Req timeout
+                  <div class="inline-field">
+                    Req
+                    <select id="reqReplies" class="sm-select" aria-label="Replies a request waits for"
+                            title="First reply: stop at the first answer, as NATS request-reply does.&#10;All replies: wait out the whole timeout and show every answer - for subjects several services answer, like $SRV.PING. A queue group answers once.">
+                      <option value="first">first reply</option>
+                      <option value="all">all replies</option>
+                    </select>
+                    within
                     <input type="number" id="reqTimeout" value="2000" class="sm-input timeout"
                            aria-label="Request timeout in milliseconds" /> ms
-                  </label>
+                  </div>
                 </div>
               </div>
 

@@ -115,6 +115,7 @@ export const els = {
   btnHeaderAdd: $("btnHeaderAdd"),
   btnFormatPayload: $("btnFormatPayload"),
   reqTimeout: $("reqTimeout"),
+  reqReplies: $("reqReplies"),
   btnPub: $("btnPub"),
   btnReq: $("btnReq"),
 

@@ -356,6 +356,26 @@ export async function request(subject, payload, headersJson, timeout) {
     headers: parseHeaders(headersJson),
     timeoutMs: timeout,
   });
+  return toReply(res);
+}
+
+/**
+ * A scatter-gather: every reply that arrives within `timeout`, not just the
+ * first. `truncated` counts replies past the backend's cap, which were
+ * received but not sent on.
+ */
+export async function requestAll(subject, payload, headersJson, timeout) {
+  const res = await post("/api/request", {
+    subject,
+    data: bytesToB64(encoder.encode(payload)),
+    headers: parseHeaders(headersJson),
+    timeoutMs: timeout,
+    all: true,
+  });
+  return { replies: res.replies.map(toReply), truncated: res.truncated || 0 };
+}
+
+function toReply(res) {
   return {
     subject: res.subject,
     data: decodePayload(res.data),

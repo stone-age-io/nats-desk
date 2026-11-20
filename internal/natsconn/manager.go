@@ -403,3 +403,83 @@ func (m *Manager) Request(subject string, data []byte, headers nats.Header, time
 	}
 	return reply, nil
 }
+
+// maxGathered caps the replies one gathering request hands back, at the
+// number the message log keeps on screen. Replies past it are counted, not
+// kept. A var so tests can reach it.
+var maxGathered = 200
+
+// Gathered is everything that answered one request within its timeout.
+type Gathered struct {
+	Replies []*nats.Msg
+
+	// Truncated counts replies that arrived after maxGathered.
+	Truncated int
+}
+
+// RequestAll sends one request and keeps every reply that arrives within the
+// timeout - a scatter-gather.
+//
+// Request stops at the first reply because core NATS request-reply works that
+// way: every subscriber gets the request, and the requester takes whichever
+// answer arrives first. A subject that several things answer, such as
+// $SRV.PING or a fleet of devices, needs this instead.
+//
+// It waits for the full timeout, as `nats req --replies=0` does. It does not
+// stop when replies stall, as jsm.go's DoReq does for the services census. A
+// stall rule suits $SYS and $SRV, where all responders answer within
+// milliseconds of each other. An application responder that takes 400ms over
+// a database query would be cut off with no sign that it was, and this log
+// must not hide a gap.
+//
+// The inbox is a plain one, not a NewRespInbox: that shape matches the
+// subscription Request shares, which would receive a copy of every reply only
+// to discard it.
+func (m *Manager) RequestAll(subject string, data []byte, headers nats.Header, timeout time.Duration) (Gathered, error) {
+	nc, err := m.conn()
+	if err != nil {
+		return Gathered{}, err
+	}
+
+	inbox := nc.NewInbox()
+	sub, err := nc.SubscribeSync(inbox)
+	if err != nil {
+		return Gathered{}, fmt.Errorf("request failed: %w", err)
+	}
+	defer sub.Unsubscribe()
+
+	deadline := time.Now().Add(timeout)
+	if err := nc.PublishMsg(&nats.Msg{Subject: subject, Reply: inbox, Data: data, Header: headers}); err != nil {
+		return Gathered{}, fmt.Errorf("request failed: %w", err)
+	}
+
+	var g Gathered
+	for {
+		left := time.Until(deadline)
+		if left <= 0 {
+			break
+		}
+		reply, err := sub.NextMsg(left)
+		if errors.Is(err, nats.ErrTimeout) {
+			break
+		}
+		if errors.Is(err, nats.ErrNoResponders) {
+			// The server sends this only when nothing subscribes, so it
+			// cannot follow real replies.
+			return Gathered{}, fmt.Errorf("no responder is listening on %s", subject)
+		}
+		if err != nil {
+			return Gathered{}, fmt.Errorf("request failed: %w", err)
+		}
+		if len(g.Replies) < maxGathered {
+			g.Replies = append(g.Replies, reply)
+		} else {
+			g.Truncated++
+		}
+	}
+
+	if len(g.Replies) == 0 {
+		return Gathered{}, fmt.Errorf("request timed out after %s", timeout)
+	}
+	return g, nil
+}
