@@ -15,8 +15,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/nats-io/jsm.go/natscontext"
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 )
 
@@ -27,6 +32,12 @@ type Summary struct {
 	URL         string `json:"url"`
 	Auth        string `json:"auth"`
 	Selected    bool   `json:"selected"`
+
+	// Color is the context's color_scheme, which the nats CLI uses to colour
+	// its tables (blue, cyan, green, magenta, red, yellow). The UI colours the
+	// connection pill with it, so a production context looks different from
+	// the others without nats-desk storing anything of its own.
+	Color string `json:"color,omitempty"`
 }
 
 // Detail is a context as the editor sees it: the file's own JSON, unchanged.
@@ -61,6 +72,7 @@ func List() ([]Summary, error) {
 				s.Description = c.Description()
 				s.URL = c.ServerURL()
 				s.Auth = authLabel(c)
+				s.Color = c.ColorScheme()
 			}
 		}
 		// A context we cannot parse still gets a row. Hiding it would leave
@@ -126,6 +138,120 @@ func Save(name string, cfg []byte) error {
 	}
 	c.Name = name
 	return c.Save(name)
+}
+
+// ErrExists is Create refusing to replace a context or a creds file.
+var ErrExists = errors.New("already exists")
+
+// Create writes a new context and refuses to replace an existing one. The
+// form saves a typed connection this way, and a profile from browser storage
+// becomes a context the nats CLI can use too.
+//
+// credsText, when given, is a .creds file's contents. A profile holds the
+// file's text, not a path, because a browser can only read an upload. A
+// context can only point at a file. natscontext can inline creds as a data:
+// URI, but nats CLI 0.3.0 reads that as a path and fails (tested), so such a
+// context would work here and break the CLI. So the text is written to
+// CredsPath(name) and the context points at it. Neither file is overwritten,
+// and the creds file is removed again if the context cannot be saved.
+func Create(name string, cfg []byte, credsText string) (credsPath string, err error) {
+	if err := natscontext.ValidateName(name); err != nil {
+		return "", err
+	}
+	if natscontext.IsKnown(name) {
+		return "", fmt.Errorf("a context named %q %w", name, ErrExists)
+	}
+
+	var fields map[string]any
+	if err := json.Unmarshal(cfg, &fields); err != nil {
+		return "", fmt.Errorf("not a valid context: %w", err)
+	}
+	if fields == nil {
+		return "", errors.New("not a valid context: expected a JSON object")
+	}
+
+	if strings.TrimSpace(credsText) != "" {
+		if err := checkCreds(credsText); err != nil {
+			return "", err
+		}
+		// perr, not err: a := here would shadow the named result, and the
+		// deferred cleanup below would then check the wrong variable.
+		path, perr := CredsPath(name)
+		if perr != nil {
+			return "", perr
+		}
+		if werr := writeNew(path, []byte(credsText)); werr != nil {
+			return "", werr
+		}
+		defer func() {
+			if err != nil {
+				_ = os.Remove(path)
+			}
+		}()
+		fields["creds"] = path
+		credsPath = path
+	}
+
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		return "", err
+	}
+	if err = Save(name, raw); err != nil {
+		return "", err
+	}
+	return credsPath, nil
+}
+
+// CredsPath is where Create writes a context's creds: a creds folder next to
+// the CLI's own context folder, <config>/nats/creds/<name>.creds. It is
+// worked out from natscontext.ContextPath, so it moves with XDG_CONFIG_HOME
+// the same way the contexts do, and it does not depend on nats-desk's own
+// directory, which a CLI context should not need.
+func CredsPath(name string) (string, error) {
+	p, err := natscontext.ContextPath(name) // <config>/nats/context/<name>.json
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(filepath.Dir(p)), "creds", name+".creds"), nil
+}
+
+// writeNew creates path with data and fails if it already exists. 0600 and
+// 0700 matter on Unix. On Windows the ACL inherited from the user profile is
+// what protects the file, as it is for the contexts themselves.
+func writeNew(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("%s %w; remove it or choose another name", path, ErrExists)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(path)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return err
+	}
+	return nil
+}
+
+// checkCreds parses the text the way a connect would, so that a context
+// pointing at an unusable file is never written.
+func checkCreds(text string) error {
+	raw := []byte(strings.ReplaceAll(text, "\r\n", "\n"))
+	if _, err := jwt.ParseDecoratedJWT(raw); err != nil {
+		return fmt.Errorf("invalid .creds file: %w", err)
+	}
+	if _, err := jwt.ParseDecoratedNKey(raw); err != nil {
+		return fmt.Errorf("invalid .creds file: %w", err)
+	}
+	return nil
 }
 
 // Delete removes a context. The CLI refuses to delete the selected one unless

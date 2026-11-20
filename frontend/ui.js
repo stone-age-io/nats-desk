@@ -1085,9 +1085,33 @@ export function renderMessage(subject, data, isRpc = false, msgHeaders = null, r
   if (isPaused && !isRpc) return;
 
   addToLogHistory(subject, data, isRpc, msgHeaders, reply);
-  clearEmpty(els.messages);
+  insertLogEntry(createMessageDiv(subject, data, isRpc, msgHeaders, reply), true);
+}
 
-  const div = createMessageDiv(subject, data, isRpc, msgHeaders, reply);
+/**
+ * A line across the log where the connection changed, so the messages above
+ * it are not read as coming from this connection. Drawn only when there is
+ * something above it to separate. It is not a message: the export leaves it
+ * out and the filter leaves it visible. A divider with nothing after it yet
+ * is replaced rather than stacked, so switching through several connections
+ * leaves one line naming where you ended up.
+ */
+export function renderLogDivider(text) {
+  if (!els.messages.querySelector(".msg-entry")) return;
+  const newest = newestFirst ? els.messages.firstElementChild : els.messages.lastElementChild;
+  if (newest?.classList.contains("log-divider")) newest.remove();
+  const div = document.createElement("div");
+  div.className = "log-divider";
+  div.setAttribute("role", "separator");
+  const label = document.createElement("span");
+  label.textContent = `${text} · ${new Date().toLocaleTimeString()}`;
+  div.append(label);
+  insertLogEntry(div, false);
+}
+
+/** Put a row at the live edge of the log, keeping the log bounded. */
+function insertLogEntry(div, countAsNew) {
+  clearEmpty(els.messages);
   const wasAtEdge = atLiveEdge();
 
   if (newestFirst) els.messages.prepend(div);
@@ -1103,7 +1127,7 @@ export function renderMessage(subject, data, isRpc = false, msgHeaders = null, r
   if (wasAtEdge) {
     scrollToLiveEdge();
     setPendingNew(0);
-  } else if (!div.hidden) {
+  } else if (countAsNew && !div.hidden) {
     setPendingNew(pendingNew + 1);
   }
 }
@@ -1209,28 +1233,112 @@ function shortHost(url) {
   }
 }
 
-// What the pill shows next to the dot. The profile name beats the host:
+// What the pill shows next to the dot. The connection's name beats the host:
 // deciding whether it is safe to publish is easier from `prod` than from
 // `mq.internal.example.com`. The full URL stays in the tooltip.
-let activeProfile = "";
+let connName = "";
 let pillUrl = null;
 
+// The color_scheme values the nats CLI accepts that are colours. It also
+// takes "double" and "rounded", which are table border styles.
+const PILL_COLORS = new Set(["blue", "cyan", "green", "magenta", "red", "yellow"]);
+
 function renderConnLabel() {
-  els.statusHost.textContent = activeProfile || (pillUrl ? shortHost(pillUrl) : "");
+  els.statusHost.textContent = connName || (pillUrl ? shortHost(pillUrl) : "");
   // The pill shows one of the two and may ellipse it, so the tooltip carries
   // both in full.
-  const detail = [activeProfile, pillUrl].filter(Boolean).join(" — ");
-  els.btnConnStatus.title = detail || "Connection settings";
+  const detail = [connName, pillUrl].filter(Boolean).join(" — ");
+  els.btnConnStatus.title = detail || "Connections";
 }
 
 /**
- * Name of the profile selected in the connection popover, or "" for none.
- * The popover is behind the pill, so the pill has to carry this - it is the
- * only place the active profile is visible once the popover closes.
+ * The saved connection we are connected as, for the pill: its name, or ""
+ * for a typed URL (the pill then shows the host), and a context's colour.
+ * Cleared on disconnect, because the pill describes the live connection, not
+ * whatever the form behind it has selected.
  */
-export function setActiveProfile(name) {
-  activeProfile = name || "";
+export function setConnIdentity(name, color = "") {
+  connName = name || "";
+  els.btnConnStatus.dataset.color = PILL_COLORS.has(color) ? color : "";
   renderConnLabel();
+}
+
+/**
+ * The saved-connection list in the connection popover.
+ *
+ * `entries` are { key, name, url, color, note, editable, convertible }. A
+ * convertible row (a profile) gets a Convert button. `currentKey` is
+ * the live connection, `activeKey` the keyboard highlight, and `busyKey` a
+ * switch in progress, during which every row is disabled.
+ */
+export function renderConnList(entries, { currentKey = null, activeKey = null, busyKey = null, emptyText = "" } = {}) {
+  if (!entries.length) {
+    setEmpty(els.connList, emptyText);
+    return;
+  }
+  els.connList.replaceChildren(...entries.map((e) => {
+    const li = document.createElement("li");
+    li.className = "conn-row";
+    li.classList.toggle("is-current", e.key === currentKey);
+    li.classList.toggle("is-active", e.key === activeKey);
+
+    const main = document.createElement("button");
+    main.className = "conn-row-main";
+    main.dataset.key = e.key;
+    main.disabled = !!busyKey;
+    main.title = e.key === currentKey ? `Connected to ${e.name}` : `Connect to ${e.name}`;
+
+    const check = document.createElement("span");
+    check.className = "conn-check";
+    check.setAttribute("aria-hidden", "true");
+    check.textContent = e.key === currentKey ? "✓" : "";
+
+    const text = document.createElement("span");
+    text.className = "conn-row-text";
+    const name = document.createElement("span");
+    name.className = "conn-row-name";
+    name.textContent = e.name;
+    const url = document.createElement("span");
+    url.className = "conn-row-url";
+    url.textContent = e.url || "";
+    text.append(name, url);
+
+    const swatch = document.createElement("span");
+    swatch.className = "conn-swatch";
+    if (PILL_COLORS.has(e.color)) {
+      swatch.dataset.color = e.color;
+      swatch.title = `color_scheme: ${e.color}`;
+    }
+
+    const note = document.createElement("span");
+    note.className = "conn-row-note";
+    note.textContent = e.key === busyKey ? "connecting…" : e.note;
+
+    main.append(check, text, swatch, note);
+    li.append(main);
+
+    if (e.convertible) {
+      const convert = document.createElement("button");
+      convert.className = "conn-row-convert";
+      convert.dataset.convert = e.key;
+      convert.disabled = !!busyKey;
+      convert.title = `Convert ${e.name} to a NATS CLI context, which the nats CLI can use too`;
+      convert.textContent = "Convert";
+      li.append(convert);
+    }
+
+    if (e.editable) {
+      const edit = document.createElement("button");
+      edit.className = "conn-row-edit";
+      edit.dataset.edit = e.key;
+      edit.disabled = !!busyKey;
+      edit.title = `Edit ${e.name}`;
+      edit.setAttribute("aria-label", `Edit ${e.name}`);
+      edit.textContent = "✎";
+      li.append(edit);
+    }
+    return li;
+  }));
 }
 
 /**
@@ -1244,13 +1352,6 @@ export function setConnectionState(state, url = null) {
   const connected = state === "connected";
   document.body.dataset.conn = state;
 
-  els.btnConnect.textContent = connected ? "Disconnect" : "Connect";
-  els.btnConnect.className = connected ? "danger block" : "primary block";
-  els.btnConnect.disabled = state === "reconnecting";
-
-  els.url.disabled = connected;
-  els.creds.disabled = connected;
-
   els.statusText.textContent = connected
     ? "Connected"
     : state === "reconnecting" ? "Reconnecting…" : "Disconnected";
@@ -1262,6 +1363,8 @@ export function setConnectionState(state, url = null) {
 
   if (state === "disconnected") {
     pillUrl = null;
+    connName = "";
+    els.btnConnStatus.dataset.color = "";
     els.rttLabel.textContent = "";
     clearSubscriptions();
   }

@@ -186,6 +186,80 @@ body[data-conn="reconnecting"] #statusText { color: var(--warn); }
 .conn-popover.fallback-open { display: block; }
 .conn-popover::backdrop { background: transparent; }
 
+/* Connection colours: a context's color_scheme, the names the nats CLI
+   accepts. One custom property, read by both the pill and a row's swatch. */
+[data-color="red"]     { --conn-color: var(--danger); }
+[data-color="yellow"]  { --conn-color: var(--warn); }
+[data-color="green"]   { --conn-color: var(--primary); }
+[data-color="blue"]    { --conn-color: var(--accent); }
+[data-color="cyan"]    { --conn-color: #39c5cf; }
+[data-color="magenta"] { --conn-color: #db61a2; }
+
+/* The inset ring doubles the border without changing the pill's size, so a
+   coloured connection does not nudge everything else in the bar. */
+.conn-pill[data-color]:not([data-color=""]),
+.conn-pill[data-color]:not([data-color=""]):hover {
+  border-color: var(--conn-color);
+  box-shadow: inset 0 0 0 1px var(--conn-color);
+}
+
+/* ---- Switcher list ------------------------------------------------------ */
+
+.conn-filter { margin-bottom: var(--s2); }
+
+.conn-list {
+  list-style: none; margin: 0; padding: 0;
+  max-height: min(50vh, 360px); overflow-y: auto;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+}
+.conn-list .empty { padding: var(--s4); }
+
+.conn-row { display: flex; align-items: stretch; }
+.conn-row + .conn-row { border-top: 1px solid var(--border-soft); }
+
+.conn-row-main {
+  flex: 1; min-width: 0;
+  display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto;
+  align-items: center; gap: var(--s2);
+  padding: 7px 10px; margin: 0;
+  background: transparent; border: 0; border-radius: 0;
+  text-align: left; font-weight: 400; color: var(--text);
+  white-space: normal;
+}
+.conn-row-main:hover:not(:disabled),
+.conn-row.is-active .conn-row-main { background: var(--border-soft); border-color: transparent; }
+.conn-row-main:active:not(:disabled) { transform: none; }
+.conn-row.is-current .conn-row-main { background: rgba(63,185,80,0.08); }
+.conn-row.is-current.is-active .conn-row-main,
+.conn-row.is-current .conn-row-main:hover:not(:disabled) { background: rgba(63,185,80,0.14); }
+
+.conn-check { color: var(--primary); font-weight: 600; text-align: center; }
+.conn-row-text { display: flex; flex-direction: column; min-width: 0; }
+.conn-row-name {
+  font-weight: 600; font-size: 0.8rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.conn-row-url {
+  font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.conn-swatch { width: 8px; height: 8px; border-radius: 50%; }
+.conn-swatch[data-color] { background: var(--conn-color); }
+.conn-row-note { font-size: 0.68rem; color: var(--muted-dim); white-space: nowrap; }
+
+.conn-row-edit, .conn-row-convert {
+  padding: 0 10px; margin: 0;
+  background: transparent; border: 0; border-left: 1px solid var(--border-soft);
+  border-radius: 0; color: var(--muted-dim); font-weight: 400;
+}
+.conn-row-convert { font-size: 0.7rem; color: var(--accent); }
+.conn-row-edit:hover:not(:disabled),
+.conn-row-convert:hover:not(:disabled) { background: var(--border-soft); border-color: var(--border-soft); color: var(--text); }
+
+.conn-list-foot { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s3); }
+
+.conn-back { padding: 0 7px; margin-right: var(--s1); font-size: 0.9rem; line-height: 1.3; }
+
 .field-group {
   margin-top: var(--s3);
   padding-top: var(--s3);
@@ -982,6 +1056,16 @@ button.disclosure.sm {
   animation: fadeIn 0.1s ease-out;
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+/* Where the connection changed. Messages above it came from another server. */
+.log-divider {
+  display: flex; align-items: center; gap: var(--s2);
+  margin: var(--s2) 0 var(--s3);
+  font-size: 0.7rem; color: var(--muted); white-space: nowrap;
+}
+.log-divider::before, .log-divider::after {
+  content: ""; flex: 1; border-top: 1px dashed var(--border);
+}
 
 .msg-meta {
   margin-bottom: var(--s1); color: var(--muted); font-size: 0.75em;

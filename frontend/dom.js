@@ -19,6 +19,13 @@ export const els = {
   statusHost: $("statusHost"),
   rttLabel: $("rttLabel"),
   btnInfo: $("btnInfo"),
+  connListView: $("connListView"),
+  connFormView: $("connFormView"),
+  connFilter: $("connFilter"),
+  connList: $("connList"),
+  btnConnNew: $("btnConnNew"),
+  btnConnDisconnect: $("btnConnDisconnect"),
+  btnConnBack: $("btnConnBack"),
 
   // --- App settings (app bar + popover) -------------------------------------
   btnSettings: $("btnSettings"),
@@ -38,11 +45,11 @@ export const els = {
   authPass: $("authPass"),
   authToken: $("authToken"),
   btnConnect: $("btnConnect"),
-  saveCredsChk: $("saveCredsChk"),
   credsHint: $("credsHint"),
 
+  profileField: $("profileField"),
   profileSelect: $("profileSelect"),
-  btnProfileSave: $("btnProfileSave"),
+  btnSaveContext: $("btnSaveContext"),
   btnProfileDelete: $("btnProfileDelete"),
 
   // --- Monitor ---------------------------------------------------------------

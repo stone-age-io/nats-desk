@@ -20,8 +20,8 @@
   <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="manifest" href="/manifest.json"/>
-  <script type="module" crossorigin src="/assets/index-ycsCOOaS.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-bwCBECwV.css">
+  <script type="module" crossorigin src="/assets/index-BzVQwaqc.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-Daj_PAPz.css">
 </head>
 <body data-conn="disconnected">
 
@@ -115,19 +115,45 @@
   <!-- ==================================================================== -->
   <!-- CONNECTION POPOVER                                                   -->
   <!-- ==================================================================== -->
-  <div id="connPopover" popover class="conn-popover" role="dialog" aria-label="Connection settings">
-    <div class="pane-head">
-      <h3>Connection</h3>
-      <div class="pane-actions">
-        <button id="btnProfileSave" class="sm-btn" title="Save these settings as a named profile">Save profile</button>
-        <button id="btnProfileDelete" class="sm-btn danger" title="Delete the selected profile">&#10005;</button>
+  <!--
+    Two views. The list is what the pill opens: every saved connection, NATS
+    CLI contexts and profiles together, one click to switch. The form behind
+    it is for a connection that is not saved yet, or for changing one - it is
+    the less common case, so it is no longer the first thing shown.
+  -->
+  <div id="connPopover" popover class="conn-popover" role="dialog" aria-label="Connections">
+    <div id="connListView" class="conn-list-view">
+      <input type="text" id="connFilter" class="conn-filter" placeholder="Filter connections"
+             aria-label="Filter connections" aria-controls="connList"
+             autocorrect="off" autocapitalize="off" spellcheck="false" />
+      <ul id="connList" class="conn-list" aria-label="Saved connections"></ul>
+      <div class="conn-list-foot">
+        <button id="btnConnNew" class="sm-btn" title="Connect to a server that is not saved, or save a new one">+ New connection</button>
+        <span class="bar-spacer"></span>
+        <button id="btnConnDisconnect" class="sm-btn danger" hidden>Disconnect</button>
       </div>
     </div>
 
-    <label for="profileSelect">Profile</label>
-    <select id="profileSelect" title="Connection profile">
-      <option value="">-- No Profile --</option>
-    </select>
+    <div id="connFormView" hidden>
+    <div class="pane-head">
+      <h3><button id="btnConnBack" class="sm-btn conn-back" title="Back to saved connections" aria-label="Back to saved connections">&#8249;</button> Connection</h3>
+      <div class="pane-actions">
+        <button id="btnSaveContext" class="sm-btn" title="Save these settings as a NATS CLI context, which the nats CLI can use too">Save as context</button>
+        <button id="btnProfileDelete" class="sm-btn danger" title="Delete this profile from this browser" hidden>&#10005;</button>
+      </div>
+    </div>
+
+    <!--
+      Profiles are connections saved in this browser's storage, from before
+      Save made NATS CLI contexts. They still connect, and Save as context
+      converts one, so the picker is shown only while any are left.
+    -->
+    <div id="profileField" hidden>
+      <label for="profileSelect">Profile <span class="muted-xs">(saved in this browser)</span></label>
+      <select id="profileSelect" title="A connection saved in this browser">
+        <option value="">-- No Profile --</option>
+      </select>
+    </div>
 
     <div class="field-group">
       <label for="contextSelect">NATS CLI context</label>
@@ -160,12 +186,13 @@
       <div id="credsHint" class="creds-hint" hidden>&#128273; Using credentials from profile</div>
     </div>
 
-    <label class="check-row">
-      <input type="checkbox" id="saveCredsChk" />
-      <span>Remember credentials in profile <span class="muted-xs">(stored unencrypted)</span></span>
-    </label>
-
     <button id="btnConnect" class="primary block">Connect</button>
+    <div class="muted-xs block-hint">
+      Save as context stores the credentials in the context file, unencrypted,
+      as <code>nats context add</code> does. A .creds file is written next to
+      the contexts.
+    </div>
+    </div>
   </div>
 
   <!-- ==================================================================== -->

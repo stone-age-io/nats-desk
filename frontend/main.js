@@ -76,6 +76,20 @@ const appState = {
   // URL we are currently connected to - used to key saved subscriptions
   connectedUrl: null,
 
+  // The saved connection we are connected as, { key, kind, name, url, color },
+  // or null. kind is "context", "profile" or "manual" (a typed URL). The
+  // switcher marks this row; the form's selection can differ from it.
+  connectedAs: null,
+
+  // Switcher: the row the keyboard has highlighted, and the row being
+  // switched to, both by key. A switch in progress disables the list.
+  connActiveKey: null,
+  connBusyKey: null,
+
+  // Set when a dialog closed the popover over the form: the field to focus
+  // when it reopens, on the form rather than the list. See reopenConnForm.
+  connReopenFocus: null,
+
   // Whether stream live-tail is running
   isTailing: false,
 
@@ -144,7 +158,7 @@ function initializeApp() {
   setupConsumerEventDelegation();
   setupServiceEventDelegation();
   setupHeaderEditor();
-  setupFallbackPopover(els.btnConnStatus, els.connPopover);
+  setupFallbackPopover(els.btnConnStatus, els.connPopover, handleConnPopoverOpen);
   setupFallbackPopover(els.btnSettings, els.settingsPopover);
   setupSettings();
   registerServiceWorker();
@@ -290,10 +304,16 @@ initializeApp();
 // ============================================================================
 
 /** Open/close a popover on a browser too old for the popover API. */
-function setupFallbackPopover(btn, pop) {
-  if (SUPPORTS_POPOVER) return; // popovertarget in the markup does the work
+function setupFallbackPopover(btn, pop, onOpen = null) {
+  if (SUPPORTS_POPOVER) {
+    // popovertarget in the markup does the opening
+    if (onOpen) pop.addEventListener("toggle", (e) => { if (e.newState === "open") onOpen(); });
+    return;
+  }
 
-  btn.addEventListener("click", () => pop.classList.toggle("fallback-open"));
+  btn.addEventListener("click", () => {
+    if (pop.classList.toggle("fallback-open") && onOpen) onOpen();
+  });
   document.addEventListener("click", (e) => {
     if (!pop.contains(e.target) && !btn.contains(e.target)) {
       pop.classList.remove("fallback-open");
@@ -439,32 +459,74 @@ function resetDataPanels() {
   resetServicesUi("Not connected");
 }
 
+/**
+ * The form's Connect button. Connecting replaces whatever is live, the same
+ * as picking a row in the list, so the form stays usable for adding or
+ * changing a connection while connected; Disconnect is in the list's footer.
+ */
 async function handleConnect() {
-  if (nats.isConnected()) {
-    try {
-      stopTailUi();
-      await nats.disconnect();
-      ui.setConnectionState("disconnected");
+  if (connLive() && !(await disconnectNats({ quiet: true }))) return;
+  await connectNats();
+}
 
-      appState.currentKvBucket = null;
-      appState.currentKvWatcher = null;
-      appState.connectedUrl = null;
-      resetDataPanels();
+/** Is there a connection, working or trying to get back? */
+function connLive() {
+  const state = document.body.dataset.conn;
+  return state === "connected" || state === "reconnecting";
+}
 
-      ui.showToast("Disconnected", "info");
-      refreshMonitorStatus();
-    } catch (err) {
-      console.error("Error during disconnect:", err);
-      ui.showToast(`Disconnect error: ${err.message}`, "error");
-    }
-    return;
+/**
+ * Drop the connection and everything that belonged to it. `quiet` skips the
+ * toast, for a switch, where the connect that follows says what happened.
+ * Returns false if the disconnect failed.
+ */
+async function disconnectNats({ quiet = false } = {}) {
+  try {
+    stopTailUi();
+    await nats.disconnect();
+    ui.setConnectionState("disconnected");
+
+    appState.currentKvBucket = null;
+    appState.currentKvWatcher = null;
+    appState.connectedUrl = null;
+    appState.connectedAs = null;
+    resetDataPanels();
+
+    if (!quiet) ui.showToast("Disconnected", "info");
+    refreshMonitorStatus();
+    return true;
+  } catch (err) {
+    console.error("Error during disconnect:", err);
+    ui.showToast(`Disconnect error: ${err.message}`, "error");
+    return false;
+  } finally {
+    renderConnSwitcher();
   }
+}
 
+/**
+ * Which saved connection the form is about to connect with, as the switcher
+ * keys it. A typed URL is "manual": it has no row of its own until saved.
+ */
+function formIdentity(url) {
+  if (appState.contextName) {
+    const ctx = appState.contexts.find((c) => c.name === appState.contextName);
+    return { key: `context:${appState.contextName}`, kind: "context", name: appState.contextName, url, color: ctx?.color || "" };
+  }
+  const profile = els.profileSelect.value;
+  if (profile) return { key: `profile:${profile}`, kind: "profile", name: profile, url, color: "" };
+  let host = url;
+  try { host = new URL(url).host || url; } catch { /* not a URL the parser knows */ }
+  return { key: "manual", kind: "manual", name: host, url, color: "" };
+}
+
+/** Connect with whatever the form holds. Returns whether it worked. */
+async function connectNats() {
   const contextName = appState.contextName;
   const url = els.url.value.trim();
   if (!url) {
     ui.showToast("Please enter a server URL", "error");
-    return;
+    return false;
   }
 
   // What the connection pill and the saved-subscription list are keyed on. A
@@ -511,6 +573,7 @@ async function handleConnect() {
           appState.currentKvBucket = null;
           appState.currentKvWatcher = null;
           appState.connectedUrl = null;
+          appState.connectedAs = null;
           resetDataPanels();
           stopTailUi();
           refreshMonitorStatus();
@@ -518,13 +581,20 @@ async function handleConnect() {
         } else if (status === "connected") {
           ui.showToast("Reconnected", "success");
         }
+        renderConnSwitcher();
       },
       (stats) => ui.setRtt(stats.rtt)
     );
 
     activeUrl = res.url || url;
     appState.connectedUrl = activeUrl;
+    appState.connectedAs = formIdentity(activeUrl);
     ui.setConnectionState("connected", activeUrl);
+    ui.setConnIdentity(
+      appState.connectedAs.kind === "manual" ? "" : appState.connectedAs.name,
+      appState.connectedAs.color,
+    );
+    ui.renderLogDivider(`Connected to ${appState.connectedAs.name}`);
     ui.showToast(
       contextName ? `Connected using context '${contextName}'` : "Connected to NATS",
       "success"
@@ -538,10 +608,12 @@ async function handleConnect() {
     if (tab === "kv") loadKvBucketsWrapper();
     else if (tab === "stream") loadStreamsWrapper();
     else if (tab === "services") loadServices();
+    return true;
   } catch (err) {
     console.error("Connection error:", err);
     ui.setConnectionState("disconnected");
     ui.showToast(err.message, "error");
+    return false;
   } finally {
     els.btnConnect.disabled = false;
   }
@@ -559,18 +631,283 @@ els.btnConnect.addEventListener("click", handleConnect);
 els.btnInfo.addEventListener("click", handleShowServerInfo);
 
 // ============================================================================
+// CONNECTION SWITCHER
+// ============================================================================
+// The pill opens a list of every saved connection, and one click switches to
+// one: disconnect, connect, done. NATS CLI contexts and profiles share the
+// list, because to someone switching they are the same thing - a name for a
+// server and a way in. The form is behind "+ New connection" and a profile's
+// edit button, for the less common job of adding or changing one.
+
+/** Every saved connection, contexts and profiles together, by name. */
+function connEntries() {
+  const contexts = appState.contexts.map((c) => ({
+    key: `context:${c.name}`,
+    kind: "context",
+    name: c.name,
+    url: c.url,
+    color: c.color || "",
+    note: c.selected ? "context · CLI default" : "context",
+    search: `${c.name} ${c.url} ${c.description || ""}`,
+    editable: true,
+  }));
+  const profiles = storage.getProfiles().map((p) => ({
+    key: `profile:${p.name}`,
+    kind: "profile",
+    name: p.name,
+    url: p.url || "",
+    color: "",
+    note: "profile",
+    search: `${p.name} ${p.url || ""}`,
+    editable: true,
+    convertible: true,
+  }));
+  return [...contexts, ...profiles].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+/**
+ * Redraw the list for the current filter and return the rows shown. A typed
+ * URL has no saved row, so while it is live it gets one at the top - without
+ * it the list would show nothing as connected, and nowhere to disconnect.
+ */
+function renderConnSwitcher() {
+  const entries = connEntries();
+  const cur = appState.connectedAs;
+  if (cur?.kind === "manual" && connLive()) {
+    entries.unshift({
+      key: "manual", kind: "manual", name: cur.name, url: cur.url, color: "",
+      note: "not saved", search: `${cur.name} ${cur.url}`, editable: true,
+    });
+  }
+  // The form's back button, only when the list has something to go back to.
+  els.btnConnBack.hidden = entries.length === 0;
+
+  const term = els.connFilter.value.trim().toLowerCase();
+  const shown = term ? entries.filter((e) => e.search.toLowerCase().includes(term)) : entries;
+  if (!shown.some((e) => e.key === appState.connActiveKey)) {
+    appState.connActiveKey = shown[0]?.key ?? null;
+  }
+
+  ui.renderConnList(shown, {
+    currentKey: connLive() ? cur?.key : null,
+    activeKey: appState.connActiveKey,
+    busyKey: appState.connBusyKey,
+    emptyText: term ? "No saved connection matches" : "No saved connections yet",
+  });
+  els.btnConnDisconnect.hidden = !connLive();
+  return shown;
+}
+
+function showConnView(view) {
+  els.connListView.hidden = view !== "list";
+  els.connFormView.hidden = view !== "form";
+}
+
+/**
+ * The popover opened: on the list, or on the form if the list is empty or a
+ * dialog has just closed the form (reopenConnForm).
+ */
+function handleConnPopoverOpen() {
+  const reopen = appState.connReopenFocus;
+  appState.connReopenFocus = null;
+  els.connFilter.value = "";
+  appState.connActiveKey = null;
+  const hasRows = renderConnSwitcher().length > 0;
+  const onForm = !!reopen || !hasRows;
+  showConnView(onForm ? "form" : "list");
+  setTimeout(() => (reopen || (onForm ? els.url : els.connFilter)).focus(), 0);
+  // Contexts are files the nats CLI can change while this runs.
+  refreshContextUi();
+}
+
+function openConnPopover() {
+  const open = SUPPORTS_POPOVER
+    ? els.connPopover.matches(":popover-open")
+    : els.connPopover.classList.contains("fallback-open");
+  if (open) {
+    handleConnPopoverOpen();
+  } else if (SUPPORTS_POPOVER) {
+    els.connPopover.showPopover(); // its toggle event calls handleConnPopoverOpen
+  } else {
+    els.connPopover.classList.add("fallback-open");
+    handleConnPopoverOpen();
+  }
+}
+
+/**
+ * Bring the form back after a dialog closed it. Opening a modal dialog closes
+ * any open popover, so a save that stops to ask something, or fails, would
+ * otherwise leave nothing on screen to correct.
+ */
+function reopenConnForm(focusEl = els.url) {
+  appState.connReopenFocus = focusEl;
+  openConnPopover();
+}
+
+/** Point the form at a saved connection, which is what connectNats reads. */
+function selectInForm(entry) {
+  if (entry.kind === "context") {
+    els.contextSelect.value = entry.name;
+    applyContextSelection();
+  } else {
+    els.profileSelect.value = entry.name;
+    handleProfileChange();
+  }
+}
+
+/** One click: drop whatever is live and connect to this row. */
+async function switchConnection(key) {
+  if (appState.connBusyKey) return;
+  if (appState.connectedAs?.key === key && connLive()) {
+    closeConnPopover();
+    return;
+  }
+  const entry = connEntries().find((e) => e.key === key);
+  if (!entry) return;
+
+  appState.connBusyKey = key;
+  renderConnSwitcher();
+  try {
+    if (connLive() && !(await disconnectNats({ quiet: true }))) return;
+    selectInForm(entry);
+    // Closes the popover on success. On failure the list stays open, with
+    // the error in a toast, so another row is one click away.
+    await connectNats();
+  } finally {
+    appState.connBusyKey = null;
+    renderConnSwitcher();
+  }
+}
+
+/**
+ * A row's edit button. A context opens its file, as everywhere else; a
+ * profile opens in the form, where Save as context converts it. The live
+ * typed-URL row opens the form as it was connected, credentials and all -
+ * the way to save that connection, since "+ New connection" clears them.
+ */
+function handleConnEdit(key) {
+  if (key === "manual") {
+    showConnView("form");
+    els.url.focus();
+    return;
+  }
+  const entry = connEntries().find((e) => e.key === key);
+  if (!entry) return;
+  if (entry.kind === "context") {
+    editContext(entry.name, { select: false });
+    return;
+  }
+  els.profileSelect.value = entry.name;
+  handleProfileChange();
+  showConnView("form");
+  els.url.focus();
+}
+
+/**
+ * Start a connection from nothing. The credentials go too: left over from
+ * the last profile, they would be sent to a server nobody meant to give them
+ * to, out of sight below the URL. The URL stays, selected, because the next
+ * server is often a variation on the last one.
+ */
+function handleConnNew() {
+  if (appState.contextName) {
+    els.contextSelect.value = "";
+    applyContextSelection();
+  }
+  els.profileSelect.value = "";
+  handleProfileChange();
+  els.authUser.value = "";
+  els.authPass.value = "";
+  els.authToken.value = "";
+  els.creds.value = "";
+  showConnView("form");
+  els.url.focus();
+  els.url.select();
+}
+
+/**
+ * A profile row's Convert: load the profile into the form and save it as a
+ * context. The form is shown first, so that if the save stops to ask for a
+ * missing password, the field it points at is on screen.
+ */
+function handleConnConvert(key) {
+  const entry = connEntries().find((e) => e.key === key);
+  if (entry?.kind !== "profile") return;
+  els.profileSelect.value = entry.name;
+  handleProfileChange();
+  showConnView("form");
+  handleSaveAsContext();
+}
+
+els.connList.addEventListener("click", (e) => {
+  const convert = e.target.closest("[data-convert]");
+  if (convert) {
+    handleConnConvert(convert.dataset.convert);
+    return;
+  }
+  const edit = e.target.closest("[data-edit]");
+  if (edit) {
+    handleConnEdit(edit.dataset.edit);
+    return;
+  }
+  const row = e.target.closest(".conn-row-main");
+  if (row) switchConnection(row.dataset.key);
+});
+
+els.connFilter.addEventListener("input", () => {
+  appState.connActiveKey = null;
+  renderConnSwitcher();
+});
+
+// Arrows move the highlight, Enter switches to it - so a connection is
+// reachable without the mouse: open the pill, type part of a name, Enter.
+els.connFilter.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
+  e.preventDefault();
+  const shown = renderConnSwitcher();
+  if (!shown.length) return;
+  if (e.key === "Enter") {
+    if (appState.connActiveKey) switchConnection(appState.connActiveKey);
+    return;
+  }
+  const i = shown.findIndex((x) => x.key === appState.connActiveKey);
+  const next = e.key === "ArrowDown" ? Math.min(i + 1, shown.length - 1) : Math.max(i - 1, 0);
+  appState.connActiveKey = shown[next].key;
+  renderConnSwitcher();
+  els.connList.querySelector(".conn-row.is-active")?.scrollIntoView({ block: "nearest" });
+});
+
+els.btnConnNew.addEventListener("click", handleConnNew);
+els.btnConnBack.addEventListener("click", () => {
+  showConnView("list");
+  els.connFilter.focus();
+});
+els.btnConnDisconnect.addEventListener("click", () => disconnectNats());
+
+// ============================================================================
 // CONNECTION PROFILE HANDLERS
 // ============================================================================
+// Profiles are connections kept in this browser's storage, from before Save
+// made NATS CLI contexts. They still connect and can be deleted; nothing new
+// is saved as one. Save as context converts one: load it into the form, then
+// save. See handleSaveAsContext.
 
 function refreshProfileUi() {
-  ui.renderNamedOptions(els.profileSelect, storage.getProfiles(), "-- No Profile --");
+  const profiles = storage.getProfiles();
+  const selected = els.profileSelect.value;
+  ui.renderNamedOptions(els.profileSelect, profiles, "-- No Profile --");
+  els.profileSelect.value = profiles.some((p) => p.name === selected) ? selected : "";
+  els.profileField.hidden = profiles.length === 0;
+  els.btnProfileDelete.hidden = !els.profileSelect.value;
+  renderConnSwitcher();
 }
 
 function handleProfileChange() {
   const profile = storage.getProfile(els.profileSelect.value);
   appState.profileCredsText = null;
   els.credsHint.hidden = true;
-  ui.setActiveProfile(els.profileSelect.value);
+  els.btnProfileDelete.hidden = !profile;
 
   if (!profile) return;
 
@@ -586,7 +923,6 @@ function handleProfileChange() {
   els.authPass.value = profile.pass || "";
   els.authToken.value = profile.token || "";
   els.creds.value = "";
-  els.saveCredsChk.checked = !!(profile.pass || profile.token || profile.credsText);
 
   if (profile.credsText) {
     appState.profileCredsText = profile.credsText;
@@ -594,39 +930,111 @@ function handleProfileChange() {
   }
 }
 
-async function handleProfileSave() {
-  const name = await dlg.promptDialog({
-    title: "Save connection profile",
-    label: "Profile name",
-    value: els.profileSelect.value || "",
-    placeholder: "dev / staging / prod",
-  });
-  if (!name) return;
+/**
+ * Save what the form holds as a new NATS CLI context, which the nats CLI can
+ * use too. This is also how a profile is converted: load it into the form
+ * (its row's Convert button does that, then calls this) and save.
+ *
+ * Only the credential a connect would use goes in - creds, then token, then
+ * user and password, the order connect applies them - because natscontext
+ * refuses a context with two kinds, and the others were never used anyway.
+ * A .creds file's text is handed to the backend, which writes it next to the
+ * contexts: a context can only point at a file.
+ */
+async function handleSaveAsContext() {
+  const url = els.url.value.trim();
+  if (!url) {
+    ui.showToast("Enter a server URL first", "error");
+    return;
+  }
+  const fromProfile = els.profileSelect.value || "";
 
-  const saveCreds = els.saveCredsChk.checked;
-  const profile = {
-    name,
-    url: els.url.value.trim(),
-    user: els.authUser.value.trim(),
-    pass: saveCreds ? els.authPass.value : "",
-    token: saveCreds ? els.authToken.value.trim() : "",
-    credsText: null,
+  // A freshly picked .creds file wins over one the profile holds, as it does
+  // when connecting.
+  let credsText = null;
+  if (els.creds.files.length > 0) credsText = await els.creds.files[0].text();
+  else if (appState.profileCredsText) credsText = appState.profileCredsText;
+  const token = els.authToken.value.trim();
+  const user = els.authUser.value.trim();
+  const pass = els.authPass.value.trim();
+
+  const config = {
+    url,
+    description: fromProfile ? `Converted from the nats-desk profile '${fromProfile}'` : "",
   };
-
-  if (saveCreds) {
-    if (els.creds.files.length > 0) {
-      profile.credsText = await els.creds.files[0].text();
-    } else if (appState.profileCredsText) {
-      // Keep creds already loaded from the profile being edited
-      profile.credsText = appState.profileCredsText;
+  if (!credsText) {
+    if (token) config.token = token;
+    else if (user) {
+      config.user = user;
+      config.password = pass;
     }
   }
 
-  storage.saveProfile(profile);
-  refreshProfileUi();
-  els.profileSelect.value = profile.name;
-  ui.setActiveProfile(profile.name);
-  ui.showToast(`Profile '${profile.name}' saved${saveCreds ? " (with credentials)" : ""}`, "success");
+  // A profile could leave its password out and have it typed at each
+  // connect. A context cannot ask, so an empty one would be saved as empty.
+  if (!credsText && !token && user && !pass) {
+    const ok = await dlg.confirmDialog({
+      title: "No password",
+      message: `The context will connect as '${user}' with an empty password. ` +
+        "A context keeps the password it connects with, so enter it first unless this server takes none.",
+      confirmLabel: "Save anyway",
+    });
+    if (!ok) {
+      reopenConnForm(els.authPass);
+      return;
+    }
+  }
+
+  const name = await dlg.promptDialog({
+    title: "Save as NATS CLI context",
+    label: "Context name",
+    value: fromProfile,
+    placeholder: "dev / staging / prod",
+  });
+  if (!name) {
+    reopenConnForm();
+    return;
+  }
+
+  let res;
+  try {
+    res = await nats.createContext(name, config, credsText);
+  } catch (err) {
+    // Most often the name is taken. The form comes back as it was, so the
+    // next Save as context can try another.
+    ui.showToast(err.message, "error");
+    reopenConnForm();
+    return;
+  }
+
+  // If what was just saved is what is live, it is that context now, so the
+  // list marks its row and the pill takes its name.
+  const cur = appState.connectedAs;
+  if (connLive() && cur && cur.url === url &&
+      (cur.kind === "manual" || (fromProfile && cur.key === `profile:${fromProfile}`))) {
+    appState.connectedAs = { ...cur, key: `context:${name}`, kind: "context", name, color: "" };
+    ui.setConnIdentity(name);
+  }
+
+  await refreshContextUi(name);
+  ui.showToast(
+    res.credsPath ? `Context '${name}' saved, with its creds in ${res.credsPath}` : `Context '${name}' saved`,
+    "success",
+  );
+
+  if (!fromProfile) return;
+  const remove = await dlg.confirmDialog({
+    title: "Delete the profile?",
+    message: `The context '${name}' now holds what the profile '${fromProfile}' did, and the nats CLI ` +
+      "can use it too. Delete the profile from this browser?",
+    confirmLabel: "Delete profile",
+    danger: true,
+  });
+  if (remove) {
+    storage.deleteProfile(fromProfile);
+    refreshProfileUi();
+    ui.showToast(`Profile '${fromProfile}' deleted`, "info");
+  }
 }
 
 async function handleProfileDelete() {
@@ -647,14 +1055,13 @@ async function handleProfileDelete() {
   storage.deleteProfile(name);
   appState.profileCredsText = null;
   els.credsHint.hidden = true;
-  refreshProfileUi();
   els.profileSelect.value = "";
-  ui.setActiveProfile("");
+  refreshProfileUi();
   ui.showToast(`Profile '${name}' deleted`, "info");
 }
 
 els.profileSelect.addEventListener("change", handleProfileChange);
-els.btnProfileSave.addEventListener("click", handleProfileSave);
+els.btnSaveContext.addEventListener("click", handleSaveAsContext);
 els.btnProfileDelete.addEventListener("click", handleProfileDelete);
 
 // ============================================================================
@@ -678,6 +1085,9 @@ const NEW_CONTEXT_TEMPLATE = {
   password: "",
   token: "",
   creds: "",
+  // Colours the connection pill while connected with this context, and the
+  // nats CLI's tables: blue, cyan, green, magenta, red or yellow.
+  color_scheme: "",
 };
 
 /**
@@ -713,6 +1123,7 @@ async function refreshContextUi(select = appState.contextName) {
 
   els.contextSelect.value = appState.contexts.some((c) => c.name === select) ? select : "";
   applyContextSelection();
+  renderConnSwitcher();
 }
 
 /** The context currently picked in the popover, or null in manual mode. */
@@ -736,17 +1147,18 @@ function applyContextSelection() {
     if (wasManual) appState.manualUrl = els.url.value;
     els.url.value = ctx.url;
     els.profileSelect.value = "";
-    ui.setActiveProfile("");
+    els.btnProfileDelete.hidden = true;
     appState.profileCredsText = null;
     els.credsHint.hidden = true;
   } else if (!wasManual) {
     els.url.value = appState.manualUrl;
   }
 
-  for (const el of [els.url, els.creds, els.authUser, els.authPass, els.authToken, els.saveCredsChk]) {
+  for (const el of [els.url, els.creds, els.authUser, els.authPass, els.authToken]) {
     el.disabled = !!ctx;
   }
-  els.btnProfileSave.disabled = !!ctx;
+  // It is a context already.
+  els.btnSaveContext.disabled = !!ctx;
   els.btnContextEdit.disabled = !ctx;
   els.btnContextDelete.disabled = !ctx;
 
@@ -788,10 +1200,18 @@ async function handleContextEdit() {
     ui.showToast("Select a context first", "info");
     return;
   }
+  await editContext(ctx.name, { select: true });
+}
 
+/**
+ * Open a context's file in the editor. `select` leaves it picked in the form
+ * afterwards, as the form's own edit button does; the switcher's edit button
+ * passes false, so editing one row does not change what the form is set to.
+ */
+async function editContext(name, { select }) {
   let detail;
   try {
-    detail = await nats.getContext(ctx.name);
+    detail = await nats.getContext(name);
   } catch (err) {
     ui.showToast(err.message, "error");
     return;
@@ -800,13 +1220,13 @@ async function handleContextEdit() {
   // The file's own JSON, unexpanded - so a portable "~/x.creds" stays portable
   // instead of being rewritten to an absolute path belonging to this machine.
   dlg.jsonDialog({
-    title: `Edit context '${ctx.name}'`,
+    title: `Edit context '${name}'`,
     hint: detail.path,
     value: detail.config,
     onSave: async (config) => {
-      await nats.saveContext(ctx.name, config);
-      await refreshContextUi(ctx.name);
-      ui.showToast(`Context '${ctx.name}' saved`, "success");
+      await nats.saveContext(name, config);
+      await refreshContextUi(select ? name : appState.contextName);
+      ui.showToast(`Context '${name}' saved`, "success");
     },
   });
 }

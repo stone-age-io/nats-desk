@@ -102,6 +102,11 @@ func (m *Manager) Connect(url string, auth AuthOptions) error {
 // The manager's own options go last, because nats.go applies options in order
 // and a context must not be able to displace the status handlers the UI
 // depends on.
+//
+// The handlers report only for the current connection. Close runs the
+// disconnected and closed callbacks asynchronously, so a connection replaced
+// by a switch would otherwise report "reconnecting" and "disconnected" after
+// its successor was already up, and the UI would believe them.
 func (m *Manager) ConnectWith(url string, opts []nats.Option) error {
 	m.Disconnect()
 
@@ -110,14 +115,20 @@ func (m *Manager) ConnectWith(url string, opts []nats.Option) error {
 	all = append(all,
 		nats.Name("nats-desk"),
 		nats.MaxReconnects(-1),
-		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-			m.sink.Status("reconnecting", err)
+		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
+			if m.isCurrent(nc) {
+				m.sink.Status("reconnecting", err)
+			}
 		}),
-		nats.ReconnectHandler(func(*nats.Conn) {
-			m.sink.Status("connected", nil)
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			if m.isCurrent(nc) {
+				m.sink.Status("connected", nil)
+			}
 		}),
 		nats.ClosedHandler(func(nc *nats.Conn) {
-			m.sink.Status("disconnected", nc.LastError())
+			if m.isCurrent(nc) {
+				m.sink.Status("disconnected", nc.LastError())
+			}
 		}),
 	)
 
@@ -212,7 +223,19 @@ func (m *Manager) Disconnect() {
 		// Drain would wait for in-flight handlers; Close is what the UI
 		// means by "disconnect now".
 		nc.Close()
+		// Reported here, not by the closed handler, which now ignores this
+		// connection: from here the report goes out before Disconnect
+		// returns, so it cannot arrive after whatever connects next. Other
+		// windows learn of the disconnect from it.
+		m.sink.Status("disconnected", nil)
 	}
+}
+
+// isCurrent reports whether nc is the connection the manager holds now.
+func (m *Manager) isCurrent(nc *nats.Conn) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.nc == nc
 }
 
 func (m *Manager) conn() (*nats.Conn, error) {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/stone-age-io/nats-desk/internal/contexts"
@@ -11,6 +12,7 @@ func (a *API) registerContexts(route func(string, http.HandlerFunc)) {
 	route("GET /api/contexts", a.listContexts)
 	route("GET /api/contexts/{name}", a.getContext)
 	route("PUT /api/contexts/{name}", a.saveContext)
+	route("POST /api/contexts/{name}", a.createContext)
 	route("DELETE /api/contexts/{name}", a.deleteContext)
 	route("POST /api/contexts/{name}/select", a.selectContext)
 }
@@ -46,6 +48,32 @@ func (a *API) saveContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// createContext makes a new context and refuses to replace one: PUT saves
+// whatever it is given, POST only creates. It takes a .creds file's text as
+// well as the config, because a profile or a browser upload has only the
+// text, and the backend is what can write the file a context points at. A
+// name already taken is 409, so the UI can tell it from a bad config.
+func (a *API) createContext(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Config    json.RawMessage `json:"config"`
+		CredsText string          `json:"credsText"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	name := r.PathValue("name")
+	path, err := contexts.Create(name, req.Config, req.CredsText)
+	if errors.Is(err, contexts.ErrExists) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"name": name, "credsPath": path})
 }
 
 func (a *API) deleteContext(w http.ResponseWriter, r *http.Request) {

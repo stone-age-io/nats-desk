@@ -138,20 +138,13 @@ export function addUrlToHistory(url) {
 // ============================================================================
 // CONNECTION PROFILES
 // ============================================================================
-// A profile is { name, url, user, pass, token, credsText }
-// Credentials are stored in plaintext localStorage - only saved when the user
-// explicitly checks "Remember credentials"
+// A profile is { name, url, user, pass, token, credsText }, credentials in
+// plaintext. Nothing new is saved as one: the form's Save makes a NATS CLI
+// context, and Save as context converts a profile. What is left here is
+// reading the old ones and deleting them.
 
 export function getProfiles() {
   return loadJson(KEYS.PROFILES, []);
-}
-
-export function saveProfile(profile) {
-  if (!profile || !profile.name) return;
-  const profiles = getProfiles().filter(p => p.name !== profile.name);
-  profiles.push(profile);
-  profiles.sort((a, b) => a.name.localeCompare(b.name));
-  saveJson(KEYS.PROFILES, profiles);
 }
 
 export function getProfile(name) {

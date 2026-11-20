@@ -619,6 +619,15 @@ export async function saveContext(name, config) {
   return put(`/api/contexts/${encodeURIComponent(name)}`, config);
 }
 
+/**
+ * Create a context and refuse a name already taken. `credsText` is a .creds
+ * file's contents, which the backend writes next to the contexts and points
+ * the context at; the answer says where, as `credsPath`.
+ */
+export async function createContext(name, config, credsText = null) {
+  return post(`/api/contexts/${encodeURIComponent(name)}`, { config, credsText: credsText || "" });
+}
+
 export async function deleteContext(name) {
   return del(`/api/contexts/${encodeURIComponent(name)}`);
 }

@@ -108,7 +108,7 @@ func TestSaveRejectsPathTraversal(t *testing.T) {
 func TestListMarksTheSelectedContext(t *testing.T) {
 	isolate(t)
 
-	save(t, "one", map[string]any{"url": "nats://one:4222", "user": "u"})
+	save(t, "one", map[string]any{"url": "nats://one:4222", "user": "u", "color_scheme": "red"})
 	save(t, "two", map[string]any{"url": "nats://two:4222"})
 
 	if err := Select("two"); err != nil {
@@ -135,6 +135,9 @@ func TestListMarksTheSelectedContext(t *testing.T) {
 	}
 	if byName["one"].Auth != "user/password" {
 		t.Errorf("one auth = %q, want user/password", byName["one"].Auth)
+	}
+	if byName["one"].Color != "red" || byName["two"].Color != "" {
+		t.Errorf("colors = %q, %q; want red and none", byName["one"].Color, byName["two"].Color)
 	}
 	if byName["two"].Auth != "none" {
 		t.Errorf("two auth = %q, want none", byName["two"].Auth)

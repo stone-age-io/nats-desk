@@ -477,6 +477,87 @@ CLI.** `context.txt` is read by every NATS tool on the machine, so changing it
 is its own endpoint and its own button. Picking one in the popover only affects
 this connection.
 
+**The pill opens a list of connections, not a form.** Picking a saved
+connection is the common job and typing a new server is the rare one, and the
+popover used to lead with the form. Switching took four steps: open,
+Disconnect, pick, Connect. Now NATS CLI contexts and profiles share one list,
+because to someone switching they are the same thing. One click on a row
+disconnects and connects, and arrow keys and Enter do the same from the
+filter box. The form is behind "+ New connection", a profile's ✎ and its
+Convert button (a context's ✎ opens its file, as everywhere else). Choices
+to keep:
+
+- The form's Connect always connects and replaces whatever is live, the same
+  as a row. It no longer turns into Disconnect, and the URL is not locked
+  while connected, because the form is now where you add or change a
+  connection, and that has to work while connected. Disconnect is in the
+  list's footer.
+- A typed-URL connection gets a "not saved" row at the top while it is live.
+  Without it the list would show nothing as connected, and the Disconnect
+  button would have nowhere to appear. Its ✎ reopens the form as it was
+  connected, credentials included. That is the way to save it, because "+ New
+  connection" clears them. Saving it as a context makes the row that context.
+- "+ New connection" clears the credentials but keeps the URL. Credentials
+  left over from the last profile would go to a server nobody meant to give
+  them to, out of sight below the URL.
+- The pill shows the live connection, not the form's selection. The name
+  beats the host, because "prod" says whether it is safe to publish and
+  `mq.internal.example.com` does not. A context's `color_scheme` (blue,
+  cyan, green, magenta, red, yellow, the CLI's own names for its table
+  colours) colours the pill. That reuses a field the CLI already has instead
+  of storing one of our own. A quick switch is also an easy mistake, and a
+  red ring is the guard against it.
+- The log gets a divider when the connection changes and there are messages
+  above it. A divider with nothing after it is replaced, not stacked.
+- Contexts are re-listed each time the pill opens, because they are files
+  the CLI can change while the app runs.
+
+**Save makes a NATS CLI context; profiles are left over.** A profile lived in
+one browser origin's `localStorage`, with its secrets in plaintext, and only
+nats-desk could use it. A context is a file the CLI shares. So the form's
+button is "Save as context", and converting a profile is the same action:
+its row's Convert loads it into the form and saves. Profiles still connect,
+can be deleted, and show their picker only while any are left. Nothing new
+is saved as one. Details that bite:
+
+- **A profile's .creds becomes a file at `<config>/nats/creds/<name>.creds`**,
+  worked out from `natscontext.ContextPath`, so it follows `XDG_CONFIG_HOME`
+  like the contexts do. A profile holds the file's text, because a browser
+  can only read an upload, and a context can only point at a file. jsm.go
+  can inline creds as `data:;base64,…`, but nats CLI 0.3.0 reads that as a
+  path and fails with "cannot find the file specified" (tested). Such a
+  context would work here and break the CLI.
+- **`POST /api/contexts/{name}` creates; `PUT` saves.** Create refuses an
+  existing context (409) and an existing creds file. A creds file left
+  behind by a deleted context is not ours to overwrite. It parses the creds
+  before writing them, and removes the file again if natscontext then
+  refuses the context. Watch for `:=` shadowing the named `err` in
+  `Create`: the cleanup `defer` reads it, and a shadowed one once left the
+  file behind. `TestCreateRemovesCredsWhenTheContextIsRefused` caught that.
+- **Only the credential a connect would use goes in**: creds, then token,
+  then user and password, the order `AuthOptions.Option` applies. natscontext
+  refuses two kinds, and the others were never used anyway.
+- **A context keeps its password.** A profile could leave it out and have it
+  typed at each connect, and a context cannot ask. A user with no password
+  therefore stops for a confirmation instead of saving an empty one.
+- **Any modal dialog closes the popover.** So a save that stops to ask, is
+  cancelled, or fails (most often a taken name) reopens the form with the
+  field that needs attention focused (`reopenConnForm`). Otherwise nothing
+  would be left on screen to correct.
+- **Converting the live connection re-keys it** to the new context, and the
+  profile is deleted only if the user agrees afterwards.
+
+**A switch must not hear from the connection it replaced.** `nc.Close()`
+queues the disconnected and closed callbacks to run asynchronously. Before
+the switcher existed, Disconnect and Connect were separate clicks seconds
+apart, so the old connection's "reconnecting" and "disconnected" always
+landed first. Back to back, they can land after the new connection is up and
+mark it dead. So the handlers report only for the manager's current
+connection (`isCurrent`), and `Disconnect` reports "disconnected" itself,
+synchronously, before it returns. Other windows learn of a disconnect from
+that report. `TestSwitchingDropsTheOldConnectionsReports` fails without
+this: it sees `[reconnecting disconnected]` arrive after the switch.
+
 **`DeleteContext` refuses to delete the active context** unless it is the only
 one. That refusal is the library's, and the UI shows it verbatim rather than
 pre-empting it - the message names the problem exactly.
@@ -643,7 +724,12 @@ To run a test copy beside the real one, give it another `-port` and point
 `APPDATA` and `LOCALAPPDATA` at the scratchpad: the token, `settings.json` and
 the log all follow, so the copy cannot change the real ones. Launch it from
 the repo-root exe path, or with `-dev`, because a normal start re-registers
-the `natsdesk://` handler to whichever exe is running.
+the `natsdesk://` handler to whichever exe is running. Point `XDG_CONFIG_HOME`
+at the scratchpad too, and the copy sees only test contexts. natscontext
+honours it on Windows, and `nats context add` run with the same variable
+writes them there. Without it the copy lists, and can edit, the real ones.
+A copy on another port is also another origin, so it starts with empty
+browser storage: no profiles, no saved subscriptions.
 
 To see a console window come and go, `EnumWindows` for visible windows of
 class `ConsoleWindowClass` *or* `CASCADIA_HOSTING_WINDOW_CLASS`. This machine
@@ -689,6 +775,16 @@ natscontext reads that on every call and caches nothing, so it is enough to
 keep a test off the developer's real `nats` contexts - and running them
 against those would be destructive.
 
+Checking that a converted context really connects needs servers that check
+credentials, and none of them need config files: `nats-server --user alice
+--pass s3cret` and `nats-server --auth tok123`. A .creds file does not need
+an operator-mode server either. A server with no auth accepts any creds, and
+the client still has to read and parse the file to send them, which is the
+part that can go wrong here. A throwaway user creds is about fifteen lines
+with `jwt/v2` and `nkeys` (see `testCreds` in `internal/contexts`). Test
+profiles are put straight into the test origin's `localStorage` under
+`nats_profiles`, since the UI no longer creates them.
+
 ## Testing
 
 `make test` runs without the race detector on purpose - `-race` needs cgo and a
@@ -697,7 +793,9 @@ not provide. Use `make test-race` where a toolchain exists.
 
 Coverage is currently thin and concentrated on the logic that is easy to get
 silently wrong: the subject filter rules, the KV operation mapping, KV write conflicts,
-request scatter-gather, the batching/drop accounting, the context editor's round-trip fidelity, the
+request scatter-gather, dropping a replaced connection's status reports, the
+batching/drop accounting, the context editor's round-trip fidelity, creating
+a context (where its creds land, never overwriting, cleaning up), the
 monitoring rate arithmetic, the `natsdesk://` argument parsing, the token
 file's accept/reject rules, and the idle countdown quit-on-close relies on -
 that a reload survives it and turning it off cancels one already running.
