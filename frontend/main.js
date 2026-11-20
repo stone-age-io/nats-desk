@@ -1678,17 +1678,23 @@ async function handleRequest() {
       return;
     }
 
-    // Gathering waits out the whole timeout, so the button has to say it is
-    // still working or a two-second pause reads as nothing happening. Its
-    // width is held so the subject box beside it does not jump.
+    // Replies show as they arrive, but gathering still waits out the whole
+    // timeout for slow responders, so the button says it is still listening.
+    // Without that, a reply that turns up late looks like it came from
+    // nowhere. Its width is held so the subject box beside it does not jump.
     els.btnReq.style.minWidth = `${els.btnReq.offsetWidth}px`;
     els.btnReq.textContent = "…";
-    const { replies, truncated } = await nats.requestAll(subj, els.pubPayload.value, ui.readHeadersJson(), timeout);
-    for (const r of replies) ui.renderMessage(r.subject, r.data, true, r.headers);
+    const { count, truncated } = await nats.requestAll(
+      subj,
+      els.pubPayload.value,
+      ui.readHeadersJson(),
+      timeout,
+      (r) => ui.renderMessage(r.subject, r.data, true, r.headers),
+    );
     if (truncated) {
       ui.showToast(
-        `${(replies.length + truncated).toLocaleString()} replies arrived - ` +
-          `the first ${replies.length} are shown, ${truncated.toLocaleString()} more were dropped`,
+        `${(count + truncated).toLocaleString()} replies arrived - ` +
+          `the first ${count} are shown, ${truncated.toLocaleString()} more were dropped`,
         "info",
       );
     }

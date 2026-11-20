@@ -330,6 +330,28 @@ func (h *Hub) MonitorStatus(st monitor.Status) {
 	}{Type: "monitor_status", Status: st})
 }
 
+// GatherReply takes the batched path. A gather is capped at 200 replies, but
+// two hundred devices answering one request land in the same 50ms window, and
+// the control channel holds 64 frames and drops what does not fit without a
+// word. Here a reply squeezed out by a busy subscription is at least counted.
+//
+// Every window gets the frame; only the one holding this gather ID shows it.
+func (h *Hub) GatherReply(gatherID, subject string, data []byte, headers nats.Header) {
+	h.queueMsg(struct {
+		Type    string              `json:"type"`
+		ID      string              `json:"id"`
+		Subject string              `json:"subject"`
+		Data    string              `json:"data"`
+		Headers map[string][]string `json:"headers,omitempty"`
+	}{
+		Type:    "gather",
+		ID:      gatherID,
+		Subject: subject,
+		Data:    base64.StdEncoding.EncodeToString(data),
+		Headers: headers,
+	})
+}
+
 // TailMessage takes the batched path: tailing a busy stream is as much of a
 // firehose as a wildcard subscription.
 func (h *Hub) TailMessage(m natsconn.TailMsg) {

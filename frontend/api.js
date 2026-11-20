@@ -109,6 +109,7 @@ const del = (p) => call("DELETE", p);
 let ws = null;
 let wsReady = null;
 const subHandlers = new Map(); // subscription id -> onMessage
+const gatherHandlers = new Map(); // requestAll gather id -> onReply
 let statusHandler = null;
 let statsHandler = null;
 let kvWatchHandler = null;
@@ -196,6 +197,13 @@ function dispatch(frame) {
     case "msg": {
       const h = subHandlers.get(frame.subId);
       if (h) h(frame.subject, decodePayload(frame.data), false, frame.headers || null, frame.reply || "");
+      break;
+    }
+    case "gather": {
+      // Every window gets every gather's replies; another window's ID is
+      // simply not in this map.
+      const h = gatherHandlers.get(frame.id);
+      if (h) h(toReply(frame));
       break;
     }
     case "status":
@@ -360,19 +368,43 @@ export async function request(subject, payload, headersJson, timeout) {
 }
 
 /**
- * A scatter-gather: every reply that arrives within `timeout`, not just the
- * first. `truncated` counts replies past the backend's cap, which were
- * received but not sent on.
+ * How long a gather's handler outlives its answer. The answer comes over HTTP
+ * and the replies over the push channel, which holds frames for up to 50ms
+ * before sending them as a batch, so the last few replies can arrive just
+ * after the answer that says the gather is over.
  */
-export async function requestAll(subject, payload, headersJson, timeout) {
-  const res = await post("/api/request", {
+const GATHER_LINGER_MS = 2000;
+
+/**
+ * A scatter-gather: every reply that arrives within `timeout`, not just the
+ * first. Each one goes to `onReply` as it arrives, over the push channel, and
+ * the promise settles only when the timeout is up, with the tally: `count`
+ * replies were sent on, and `truncated` more arrived past the backend's cap
+ * and were not.
+ *
+ * The gather ID is made here rather than by the backend because the first
+ * reply can arrive before the HTTP answer does. An ID that came back in the
+ * answer would be too late to recognise it.
+ */
+export async function requestAll(subject, payload, headersJson, timeout, onReply) {
+  const body = {
     subject,
     data: bytesToB64(encoder.encode(payload)),
     headers: parseHeaders(headersJson),
     timeoutMs: timeout,
     all: true,
-  });
-  return { replies: res.replies.map(toReply), truncated: res.truncated || 0 };
+    gatherId: crypto.randomUUID(),
+  };
+  // The socket has to be open before the request goes out, or the backend
+  // has nowhere to send the first replies.
+  await connectWs();
+  gatherHandlers.set(body.gatherId, onReply);
+  try {
+    const res = await post("/api/request", body);
+    return { count: res.count || 0, truncated: res.truncated || 0 };
+  } finally {
+    setTimeout(() => gatherHandlers.delete(body.gatherId), GATHER_LINGER_MS);
+  }
 }
 
 function toReply(res) {

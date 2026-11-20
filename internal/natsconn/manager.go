@@ -34,6 +34,11 @@ type Sink interface {
 	Stats(rttMillis float64)
 	KvChange(key, operation string)
 	TailMessage(msg TailMsg)
+
+	// GatherReply is one reply to a RequestAll, handed on the moment it
+	// arrives. gatherID is the caller's, so the window that asked can pick
+	// its own replies out of a channel every window shares.
+	GatherReply(gatherID, subject string, data []byte, headers nats.Header)
 }
 
 // TailMsg is one message from a live stream tail.
@@ -427,21 +432,28 @@ func (m *Manager) Request(subject string, data []byte, headers nats.Header, time
 	return reply, nil
 }
 
-// maxGathered caps the replies one gathering request hands back, at the
-// number the message log keeps on screen. Replies past it are counted, not
-// kept. A var so tests can reach it.
+// maxGathered caps the replies one gathering request hands on, at the number
+// the message log keeps on screen. Replies past it are counted, not sent. A
+// var so tests can reach it.
 var maxGathered = 200
 
-// Gathered is everything that answered one request within its timeout.
+// Gathered is the tally of one gathering request, once its timeout is up. The
+// replies themselves have already gone to the sink.
 type Gathered struct {
-	Replies []*nats.Msg
+	// Count is how many replies went to the sink.
+	Count int
 
 	// Truncated counts replies that arrived after maxGathered.
 	Truncated int
 }
 
-// RequestAll sends one request and keeps every reply that arrives within the
-// timeout - a scatter-gather.
+// RequestAll sends one request and passes every reply that arrives within the
+// timeout to the sink as GatherReply, tagged with gatherID - a scatter-gather.
+//
+// The replies go out as they arrive, not as one answer when the timeout is up.
+// The timeout is the longest anyone waits, not how long the first reply takes:
+// with a five second window and responders that answer in milliseconds,
+// holding everything back meant five seconds of nothing and then the lot.
 //
 // Request stops at the first reply because core NATS request-reply works that
 // way: every subscriber gets the request, and the requester takes whichever
@@ -458,7 +470,7 @@ type Gathered struct {
 // The inbox is a plain one, not a NewRespInbox: that shape matches the
 // subscription Request shares, which would receive a copy of every reply only
 // to discard it.
-func (m *Manager) RequestAll(subject string, data []byte, headers nats.Header, timeout time.Duration) (Gathered, error) {
+func (m *Manager) RequestAll(gatherID, subject string, data []byte, headers nats.Header, timeout time.Duration) (Gathered, error) {
 	nc, err := m.conn()
 	if err != nil {
 		return Gathered{}, err
@@ -494,14 +506,15 @@ func (m *Manager) RequestAll(subject string, data []byte, headers nats.Header, t
 		if err != nil {
 			return Gathered{}, fmt.Errorf("request failed: %w", err)
 		}
-		if len(g.Replies) < maxGathered {
-			g.Replies = append(g.Replies, reply)
+		if g.Count < maxGathered {
+			m.sink.GatherReply(gatherID, reply.Subject, reply.Data, reply.Header)
+			g.Count++
 		} else {
 			g.Truncated++
 		}
 	}
 
-	if len(g.Replies) == 0 {
+	if g.Count == 0 {
 		return Gathered{}, fmt.Errorf("request timed out after %s", timeout)
 	}
 	return g, nil

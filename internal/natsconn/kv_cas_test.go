@@ -23,6 +23,7 @@ func (nopSink) Status(string, error)                                {}
 func (nopSink) Stats(float64)                                       {}
 func (nopSink) KvChange(string, string)                             {}
 func (nopSink) TailMessage(TailMsg)                                 {}
+func (nopSink) GatherReply(string, string, []byte, nats.Header)     {}
 
 // kvManager connects a Manager to a fresh JetStream server and opens a bucket.
 func kvManager(t *testing.T) *Manager {

@@ -378,9 +378,24 @@ Details:
 - No responders is still reported at once. `NextMsg` turns the server's 503
   into `ErrNoResponders`. The server sends the 503 only when nothing
   subscribes, so it never comes after real replies.
-- The replies come back in one REST response when the window closes. They
-  are not streamed over the push channel: the user sets the window and it is
-  bounded, and the button shows "…" until it closes.
+- Replies are pushed over the push channel as they arrive, tagged with a
+  gather ID. They used to come back in one REST response when the window
+  closed, and that felt broken: a 5s window with responders answering in
+  milliseconds meant five seconds of "…" and then everything at once. The
+  REST call still lasts the whole window, and the button still shows "…"
+  until it closes. What it returns now is only the tally, `{count,
+  truncated}`, plus the errors.
+- The browser makes the gather ID (`crypto.randomUUID()`) and sends it with
+  the request. The first reply can be pushed before the REST call returns,
+  so an ID the backend handed back would arrive too late to label it. Every
+  window gets every gather frame and ignores IDs it did not make.
+- Replies take the batched path, not the control path. 200 replies can land
+  in one 50ms window, and the control channel holds 64 frames and drops the
+  rest without telling anyone. On the batched path a reply squeezed out by a
+  busy subscription is at least counted in the "dropped" toast.
+- The handler stays registered for 2s after the REST call returns
+  (`GATHER_LINGER_MS`). The push channel holds frames for up to 50ms, so the
+  last replies can arrive after the HTTP answer that ends the gather.
 
 **A queue subscription is tagged, and the queue box clears after every
 subscribe.** A queue member gets only its share of the traffic, which looks
@@ -809,8 +824,9 @@ tests.
 test process (loopback, random port; JetStream in a temp dir for the KV
 tests). The KV tests pin down which error a stale revision produces and what
 a tombstone does to a create-only write. The request tests pin down that a
-gather waits for a slow responder, that no responders fails at once while
-silence is a timeout, and that the cap counts what it drops. The services tests register real micro services,
+gather hands each reply on as it arrives yet still waits for a slow
+responder, that no responders fails at once while silence is a timeout, and
+that the cap counts what it drops. The services tests register real micro services,
 and what those check is mostly the server's behaviour - what "no responders" looks
 like, what a refused publish looks like, when an unsubscribe takes effect - and
 a fake would only encode guesses about all three. `censusTimeout` and

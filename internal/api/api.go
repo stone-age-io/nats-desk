@@ -210,7 +210,14 @@ func replyJSON(m *nats.Msg) map[string]any {
 }
 
 // request takes the first reply, or with "all" every reply within the
-// timeout. The two give different shapes: one reply, or {replies, truncated}.
+// timeout. The two give different shapes. The first reply comes back as the
+// answer. With "all" the replies go over the push channel as they arrive,
+// tagged with gatherId, and the answer, once the timeout is up, is only the
+// tally: {count, truncated}.
+//
+// The browser picks the gather ID, not us. The first reply can be pushed
+// before this handler has answered, so an ID handed back in the answer would
+// arrive after the replies it was meant to label.
 func (a *API) request(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Subject   string              `json:"subject"`
@@ -218,6 +225,7 @@ func (a *API) request(w http.ResponseWriter, r *http.Request) {
 		Headers   map[string][]string `json:"headers"`
 		TimeoutMs int                 `json:"timeoutMs"`
 		All       bool                `json:"all"`
+		GatherID  string              `json:"gatherId"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -237,16 +245,16 @@ func (a *API) request(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.All {
-		g, err := a.mgr.RequestAll(req.Subject, data, toNatsHeader(req.Headers), timeout)
+		if req.GatherID == "" {
+			fail(w, errors.New("a gather id is required"))
+			return
+		}
+		g, err := a.mgr.RequestAll(req.GatherID, req.Subject, data, toNatsHeader(req.Headers), timeout)
 		if err != nil {
 			fail(w, err)
 			return
 		}
-		replies := make([]map[string]any, 0, len(g.Replies))
-		for _, m := range g.Replies {
-			replies = append(replies, replyJSON(m))
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"replies": replies, "truncated": g.Truncated})
+		writeJSON(w, http.StatusOK, map[string]any{"count": g.Count, "truncated": g.Truncated})
 		return
 	}
 
